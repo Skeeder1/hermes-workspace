@@ -56,9 +56,15 @@ export const chatQueryKeys = {
 } as const
 
 export async function fetchSessions(): Promise<Array<SessionMeta>> {
-  const res = await fetch('/api/sessions')
+  const res = await fetch('/api/sessions', { cache: 'no-store' })
   if (!res.ok) throw new Error(await readError(res))
   const data = (await res.json()) as SessionListResponse
+  if (data.source === 'unavailable') {
+    throw new Error(data.message || 'Sessions are unavailable')
+  }
+  if (data.ok === false) {
+    throw new Error(data.error || data.message || 'Sessions request failed')
+  }
   return normalizeSessions(data.sessions)
 }
 
@@ -475,7 +481,7 @@ export function moveHistoryMessages(
   const messages = Array.isArray(fromData.messages) ? fromData.messages : []
   queryClient.setQueryData(toKey, {
     sessionKey: toSessionKey,
-    sessionId: (fromData as any).sessionId,
+    sessionId: fromData.sessionId,
     messages,
   })
   queryClient.removeQueries({ queryKey: fromKey, exact: true })

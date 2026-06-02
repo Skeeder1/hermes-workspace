@@ -37,6 +37,7 @@ import {
   streamChat,
 } from '../../server/claude-api'
 import type {OpenAICompatContentPart, OpenAICompatMessage} from '../../server/openai-compat-api';
+import { toErrorMessage } from '@/lib/error-utils'
 // Claude agent runs can take 5+ minutes with complex tool chains
 const SEND_STREAM_RUN_TIMEOUT_MS = 600_000
 const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'])
@@ -197,7 +198,7 @@ function normalizePortableHistory(
 }
 
 function normalizeClaudeErrorMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error)
+  const raw = toErrorMessage(error)
   const message = raw.trim()
   if (!message) return 'Claude request failed'
   return message.replace(/\bserver\b/gi, 'Claude')
@@ -1390,7 +1391,7 @@ export const Route = createFileRoute('/api/send-stream')({
                               lastAssistantIndex
                             ] as Record<string, unknown>
                             const rawToolCalls = (lastAssistant.tool_calls ??
-                              (lastAssistant as any).toolCalls) as
+                              lastAssistant.toolCalls) as
                               | Array<Record<string, unknown>>
                               | undefined
                             const toolCalls =

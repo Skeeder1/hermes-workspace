@@ -3,6 +3,7 @@ import type { ChatAttachment, ChatMessage } from '../types'
 import { readResolvedSessionHeaders } from '@/lib/send-stream-session-headers'
 import { useChatStore } from '@/stores/chat-store'
 import { pushActivity } from '@/components/inspector/activity-store'
+import { toErrorMessage } from '@/lib/error-utils'
 
 /**
  * Determine whether a stream-resolved session key change should trigger
@@ -822,7 +823,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
                 { type: 'text' as const, text: fullTextRef.current },
               ],
               __streamingStatus: 'interrupted',
-            } as any,
+            },
           })
         }
         eventSourceRef.current.abort()
@@ -1002,7 +1003,7 @@ export function useStreamingMessage(options: UseStreamingMessageOptions = {}) {
           onAbort?.()
           return
         }
-        const errorMessage = err instanceof Error ? err.message : String(err)
+        const errorMessage = toErrorMessage(err)
         markFailed(errorMessage)
       }
     },

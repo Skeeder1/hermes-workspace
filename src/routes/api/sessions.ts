@@ -69,7 +69,7 @@ export const Route = createFileRoute('/api/sessions')({
                 message_count: ls.messageCount,
                 model: ls.model,
                 source: 'local',
-              } as any)
+              })
             }
           }
 

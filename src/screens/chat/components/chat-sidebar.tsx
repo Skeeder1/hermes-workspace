@@ -1,14 +1,18 @@
 import { HugeiconsIcon } from '@hugeicons/react'
+import type { IconSvgElement } from '@hugeicons/react'
 import {
+  AiProgrammingIcon,
   ArrowDown01Icon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
+  Cancel01Icon,
   BrainIcon,
   Building01Icon,
   Castle02Icon,
   Chat01Icon,
   CheckListIcon,
   Clock01Icon,
+  CodeIcon,
   ComputerTerminal01Icon,
   DashboardSquare01Icon,
   File01Icon,
@@ -101,7 +105,7 @@ function ThemeToggleMini() {
             : currentDataTheme.replace(/-light$/, ''))
         // Import and call setTheme to persist and apply
         import('@/lib/theme').then(({ setTheme }) => {
-          setTheme(nextDataTheme as any)
+          setTheme(nextDataTheme as import('@/lib/theme').ThemeId)
         })
         // Also update settings hook
         const nextMode = nextDataTheme.endsWith('-light') ? 'light' : 'dark'
@@ -141,9 +145,7 @@ type ChatSidebarProps = {
 type NavItemDef = {
   kind: 'link' | 'button'
   to?: string
-  search?: Record<string, unknown>
-  hash?: string
-  icon: unknown
+  icon: IconSvgElement
   label: string
   active: boolean
   onClick?: () => void
@@ -190,7 +192,7 @@ function NavItem({
     item.badge === 'error-dot' ? (
       <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
         <HugeiconsIcon
-          icon={item.icon as any}
+          icon={item.icon}
           size={20}
           strokeWidth={1.5}
           className="size-5 shrink-0"
@@ -199,7 +201,7 @@ function NavItem({
       </span>
     ) : (
       <HugeiconsIcon
-        icon={item.icon as any}
+        icon={item.icon}
         size={20}
         strokeWidth={1.5}
         className="size-5 shrink-0"
@@ -254,8 +256,6 @@ function NavItem({
               render={
                 <Link
                   to={item.to}
-                  search={item.search}
-                  hash={item.hash}
                   onClick={handleSelect}
                   className={cls}
                   data-tour={item.dataTour}
@@ -272,8 +272,6 @@ function NavItem({
     return (
       <Link
         to={item.to}
-        search={item.search}
-        hash={item.hash}
         onClick={handleSelect}
         className={cls}
         data-tour={item.dataTour}
@@ -578,6 +576,8 @@ function ChatSidebarComponent({
   const isSkillsActive = pathname === '/skills'
   const isMcpActive = pathname === '/mcp'
   const isFilesActive = pathname === '/files'
+  const isCodeActive = pathname === '/vscode'
+  const isAgentsActive = pathname.startsWith('/cloudcli')
   const isPlaygroundActive = pathname === '/playground'
   const isAgoraActive = pathname === '/agora'
   const isTerminalActive = pathname === '/terminal'
@@ -587,7 +587,7 @@ function ChatSidebarComponent({
   const isConductorActive = pathname === '/conductor'
   const isOperationsActive = pathname === '/operations'
   const isSwarmActive = pathname === '/swarm' || pathname === '/swarm2'
-  const mainRoutes = ['/chat', '/new', '/files', '/terminal']
+  const mainRoutes = ['/chat', '/new', '/files', '/vscode', '/cloudcli', '/terminal']
   const knowledgeRoutes = ['/memory', '/skills']
   const systemRoutes = ['/settings', '/logs']
 
@@ -698,12 +698,6 @@ function ChatSidebarComponent({
   const isVisuallyCollapsed = isCollapsed && !isHoverPreviewExpanded
 
   function handleSidebarToggle() {
-    // In hover-preview mode, a click should dismiss the preview first;
-    // otherwise toggle the persistent collapsed state.
-    if (isHoverPreviewExpanded) {
-      setIsHoverExpanded(false)
-      return
-    }
     onToggleCollapse()
   }
 
@@ -802,6 +796,20 @@ function ChatSidebarComponent({
       icon: File01Icon,
       label: t('nav.files'),
       active: isFilesActive,
+    },
+    {
+      kind: 'link',
+      to: '/vscode',
+      icon: CodeIcon,
+      label: 'Code',
+      active: isCodeActive,
+    },
+    {
+      kind: 'link',
+      to: '/cloudcli',
+      icon: AiProgrammingIcon,
+      label: 'Agents',
+      active: isAgentsActive,
     },
     {
       kind: 'link',
@@ -960,7 +968,9 @@ function ChatSidebarComponent({
                   size="icon-sm"
                   variant="ghost"
                   aria-label={
-                    isVisuallyCollapsed ? 'Open Sidebar' : 'Close Sidebar'
+                    isVisuallyCollapsed ? 'Open Sidebar'
+                    : isHoverPreviewExpanded ? 'Keep open'
+                    : 'Unpin sidebar'
                   }
                   className="absolute right-2 top-1/2 shrink-0 -translate-y-1/2 opacity-80 hover:opacity-100"
                   data-tour="sidebar-collapse-toggle"
@@ -971,10 +981,16 @@ function ChatSidebarComponent({
                       size={18}
                       strokeWidth={1.75}
                     />
+                  ) : isHoverPreviewExpanded ? (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <circle cx="8" cy="5.5" r="3" stroke="currentColor" strokeWidth="1.5" />
+                      <path d="M8 8.5V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      <path d="M5.5 8.5H10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
                   ) : (
                     <HugeiconsIcon
-                      icon={ArrowLeft01Icon}
-                      size={18}
+                      icon={Cancel01Icon}
+                      size={16}
                       strokeWidth={1.75}
                     />
                   )}
@@ -982,7 +998,7 @@ function ChatSidebarComponent({
               }
             />
             <TooltipContent side="right">
-              {isVisuallyCollapsed ? 'Open Sidebar' : 'Close Sidebar'}
+              {isVisuallyCollapsed ? 'Open Sidebar' : isHoverPreviewExpanded ? 'Keep open' : 'Unpin sidebar'}
             </TooltipContent>
           </TooltipRoot>
         </TooltipProvider>
@@ -1035,7 +1051,7 @@ function ChatSidebarComponent({
       {/* ── HermesWorld featured link (gold castle, NEW badge) ────── */}
       {/* Hide when VITE_HERMESWORLD_ENABLED is explicitly '0' */}
       {!isVisuallyCollapsed &&
-        (import.meta as any).env?.VITE_HERMESWORLD_ENABLED !== '0' && (
+        import.meta.env.VITE_HERMESWORLD_ENABLED !== '0' && (
         <div className="px-2 pb-2">
           <Link
             to="/playground"
