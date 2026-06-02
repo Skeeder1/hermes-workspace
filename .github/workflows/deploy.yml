@@ -1,0 +1,65 @@
+name: Deploy to VM
+
+on:
+  push:
+    branches: [main]
+
+# Prevent concurrent deploys — queue rather than cancel
+concurrency:
+  group: deploy-hermes
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy hermes-workspace
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    steps:
+      - name: Pull latest code
+        run: |
+          git -C /home/openclaw/agent-studio/hermes-workspace fetch origin main
+          git -C /home/openclaw/agent-studio/hermes-workspace reset --hard origin/main
+
+      - name: Deploy via geko
+        run: geko workspace deploy
+
+      - name: Wait for service restart
+        run: sleep 15
+
+      - name: Verify deployment
+        shell: python3 {0}
+        run: |
+          import subprocess, json, sys
+
+          result = subprocess.run(
+              ['geko', 'workspace', 'doctor', '--json'],
+              capture_output=True, text=True
+          )
+          if result.returncode != 0:
+              print('geko workspace doctor failed:', result.stderr)
+              sys.exit(1)
+
+          data = json.loads(result.stdout)
+          rows = data.get('rows', [])
+          failures = [r for r in rows if r.get('status') == 'fail']
+          ok_count = len(rows) - len(failures)
+
+          print(f'Workspace checks: {ok_count}/{len(rows)} passed')
+
+          if not failures:
+              print('All checks passed — deployment OK')
+              sys.exit(0)
+
+          print('\nFailed checks:')
+          for f in failures:
+              print(f'  FAIL  {f["check"]}: {f["detail"]}')
+
+          # Only block on services, APIs and HTTPS — ignore informational rows
+          critical_keywords = ['service:', 'api:', 'tailscale', 'https']
+          critical = [f for f in failures if any(k in f.get('check', '') for k in critical_keywords)]
+          if critical:
+              print('\nCritical failures detected — deployment FAILED')
+              sys.exit(1)
+
+          print('\nNon-critical warnings only — deployment OK')
