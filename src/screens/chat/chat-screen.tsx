@@ -1034,9 +1034,9 @@ export function ChatScreen({
     currentModel, // Real model from session-status (fail closed if empty)
     sessionKey: resolvedSessionKey || 'main',
     messages: historyMessages.map((m) => ({
-      role: m.role as 'user' | 'assistant',
+      role: m.role ?? 'user',
       content: textFromMessage(m),
-    })) as any,
+    })),
     availableModels: availableModelIds,
   })
 
