@@ -1,6 +1,6 @@
 'use client'
 
-import { HugeiconsIcon } from '@hugeicons/react'
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   ArrowLeft01Icon,
   Cancel01Icon,
@@ -50,6 +50,11 @@ import { getUnavailableReason } from '@/lib/feature-gates'
 import { useFeatureAvailable } from '@/hooks/use-feature-available'
 import { ProviderLogo } from '@/components/provider-logo'
 import {
+  PROVIDER_CATALOG,
+  type ProviderInfo,
+} from '@/lib/provider-catalog'
+import { useModelCatalog } from '@/hooks/use-model-catalog'
+import {
   DialogClose,
   DialogContent,
   DialogDescription,
@@ -73,7 +78,7 @@ type SectionId =
   | 'notifications'
   | 'language'
 
-const SECTIONS: Array<{ id: SectionId; label: string; icon: any }> = [
+const SECTIONS: Array<{ id: SectionId; label: string; icon: IconSvgElement }> = [
   { id: 'claude', label: 'Model & Provider', icon: CloudIcon },
   { id: 'agent', label: 'Agent', icon: Settings02Icon },
   { id: 'voice', label: 'Voice', icon: VolumeHighIcon },
@@ -152,99 +157,31 @@ const SETTINGS_CARD_CLASS =
 
 // ── Section components ──────────────────────────────────────────────────
 
-const PROVIDER_CARDS: Array<{
+type ProviderCard = {
   id: string
   name: string
-  logo: string
-  models: Array<string>
   authType: 'oauth' | 'api_key' | 'none'
   envKey?: string
-}> = [
-  // Local providers first — zero setup
-  {
-    id: 'ollama',
-    name: 'Ollama',
-    logo: '/providers/ollama.png',
-    models: ['llama3.1:70b', 'qwen3:32b', 'deepseek-r1:32b'],
-    authType: 'none',
-  },
-  {
-    id: 'atomic-chat',
-    name: 'Atomic Chat',
-    logo: '/providers/atomic-chat.png',
-    models: ['llama-3.2-3b', 'qwen2.5-7b', 'gemma-3-4b'],
-    authType: 'none',
-  },
-  // Cloud providers
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    logo: '/providers/anthropic.png',
-    models: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-3-5'],
-    authType: 'api_key',
-    envKey: 'ANTHROPIC_API_KEY',
-  },
-  {
-    id: 'nous',
-    name: 'Nous Portal',
-    logo: '/providers/nous.png',
-    models: [
-      'xiaomi/mimo-v2-pro',
-      'xiaomi/mimo-v2-omni',
-      'claude-3-llama-3.1-405b',
-      'claude-3-llama-3.1-70b',
-    ],
-    authType: 'oauth',
-  },
-  {
-    id: 'openai-codex',
-    name: 'OpenAI Codex',
-    logo: '/providers/openai.png',
-    models: ['gpt-5.4', 'gpt-5.3-codex', 'gpt-4o'],
-    authType: 'oauth',
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    logo: '/providers/openrouter.png',
-    models: ['auto', 'deepseek/deepseek-r1', 'google/gemini-2.5-pro'],
-    authType: 'api_key',
-    envKey: 'OPENROUTER_API_KEY',
-  },
-  {
-    id: 'zai',
-    name: 'Z.AI / GLM',
-    logo: '/providers/zhipu.png',
-    models: ['glm-4-plus', 'glm-4-air'],
-    authType: 'api_key',
-    envKey: 'GLM_API_KEY',
-  },
-  {
-    id: 'kimi-coding',
-    name: 'Kimi',
-    logo: '/providers/kimi.png',
-    models: ['kimi-latest', 'moonshot-v1-128k'],
-    authType: 'api_key',
-    envKey: 'KIMI_API_KEY',
-  },
-  {
-    id: 'minimax',
-    name: 'MiniMax',
-    logo: '/providers/minimax.png',
-    models: ['MiniMax-M2.5', 'MiniMax-M2.5-Lightning'],
-    authType: 'api_key',
-    envKey: 'MINIMAX_API_KEY',
-  },
-  {
-    id: 'xiaomi',
-    name: 'Xiaomi MiMo',
-    logo: '/providers/xiaomi.png',
-    models: ['mimo-v2-pro', 'mimo-v2-omni', 'mimo-v2-flash'],
-    authType: 'api_key',
-    envKey: 'XIAOMI_API_KEY',
-  },
-  { id: 'custom', name: 'Custom', logo: '', models: [], authType: 'api_key', envKey: 'CUSTOM_API_KEY' },
-]
+}
+
+function cardAuthTypeFor(p: ProviderInfo): ProviderCard['authType'] {
+  if (p.authTypes.includes('local')) return 'none'
+  if (p.authTypes.includes('api-key')) return 'api_key'
+  if (p.authTypes.includes('oauth')) return 'oauth'
+  return 'api_key'
+}
+
+const PROVIDER_CARDS: Array<ProviderCard> = PROVIDER_CATALOG.map((p) => ({
+  id: p.id,
+  name: p.name,
+  authType: cardAuthTypeFor(p),
+  envKey: p.apiKeyEnv,
+}))
+  // Local providers first (zero setup), then cloud — preserves prior UX
+  .sort((a, b) => {
+    const rank = (t: ProviderCard['authType']) => (t === 'none' ? 0 : 1)
+    return rank(a.authType) - rank(b.authType)
+  })
 
 export type ProviderClickAction = 'select' | 'oauth' | 'local' | 'custom' | 'ignore'
 
@@ -302,11 +239,11 @@ type OAuthPollResponse = {
 
 function HermesContent() {
   const configAvailable = useFeatureAvailable('config')
+  const catalog = useModelCatalog()
   const [activeProvider, setActiveProvider] = useState('')
   const [activeModel, setActiveModel] = useState('')
   const [defaultProvider, setDefaultProvider] = useState('')
   const [defaultModelId, setDefaultModelId] = useState('')
-  const [availableModels, setAvailableModels] = useState<Array<string>>([])
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [_saving, setSaving] = useState(false)
@@ -314,6 +251,7 @@ function HermesContent() {
   const [configuredKeys, setConfiguredKeys] = useState<Record<string, string>>(
     {},
   )
+  const [authenticatedProviderIds, setAuthenticatedProviderIds] = useState<Set<string>>(new Set())
   const [memEnabled, setMemEnabled] = useState(true)
   const [userProfileEnabled, setUserProfileEnabled] = useState(true)
   const [customBaseUrl, setCustomBaseUrl] = useState('')
@@ -337,38 +275,47 @@ function HermesContent() {
     models: Array<{ id: string; name: string; provider: string }>
   } | null>(null)
 
-  const fetchModelsForProvider = useCallback(
-    (providerId: string) => {
-      // For local providers, prefer auto-discovered models first
+  const getModelsForProvider = useCallback(
+    (providerId: string): Array<string> => {
+      // 1. Local providers: prefer auto-discovered models
       if (localDiscovery) {
         const discovered = localDiscovery.models
           .filter((m) => m.provider === providerId)
           .map((m) => m.id)
-        if (discovered.length > 0) {
-          setAvailableModels(discovered)
-          return
-        }
+        if (discovered.length > 0) return discovered
       }
-      fetch(
-        `/api/claude-proxy/api/available-models?provider=${encodeURIComponent(providerId)}`,
+
+      // 2. Catalog sections (shared source of truth with chat-composer)
+      const section = catalog.sections.find(
+        (s) => s.providerId === providerId,
       )
-        .then((r) => r.json())
-        .then((d: { models?: Array<{ id: string }> }) => {
-          setAvailableModels((d.models || []).map((m) => m.id))
+      if (section && section.models.length > 0) {
+        return section.models.map((m) => m.id)
+      }
+
+      // 3. All models from gateway filtered by provider
+      const gatewayModels = catalog.allModels
+        .map((m) => {
+          const id = typeof m === 'string' ? m : m.id || m.name || m.model || ''
+          const prov =
+            typeof m === 'string'
+              ? catalog.currentProvider
+              : m.provider || catalog.currentProvider
+          return { id, provider: prov }
         })
-        .catch(() => {
-          // Fall back to hardcoded
-          const card = PROVIDER_CARDS.find((p) => p.id === providerId)
-          setAvailableModels(card?.models || [])
-        })
+        .filter((m) => m.provider === providerId && m.id)
+        .map((m) => m.id)
+      if (gatewayModels.length > 0) return gatewayModels
+
+      return []
     },
-    [localDiscovery],
+    [catalog.sections, catalog.allModels, catalog.currentProvider, localDiscovery],
   )
 
   useEffect(() => {
     fetch('/api/local-providers')
       .then((r) => r.json())
-      .then((d: any) => {
+      .then((d: Record<string, unknown>) => {
         if (d.ok) setLocalDiscovery(d)
       })
       .catch(() => {})
@@ -377,23 +324,26 @@ function HermesContent() {
   useEffect(() => {
     fetch('/api/hermes-config')
       .then((r) => r.json())
-      .then((d: any) => {
+      .then((d: Record<string, unknown>) => {
         setActiveProvider(d.activeProvider || '')
         setActiveModel(d.activeModel || '')
         setDefaultProvider(d.activeProvider || '')
         setDefaultModelId(d.activeModel || '')
-        if (d.activeProvider) fetchModelsForProvider(d.activeProvider)
+        if (d.activeProvider) /* models loaded via catalog */ void d.activeProvider
         const mem = (d.config?.memory as Record<string, unknown>) || {}
         setMemEnabled(mem.memory_enabled !== false)
         setUserProfileEnabled(mem.user_profile_enabled !== false)
-        // Build configured keys map
+        // Build configured keys map + authenticated provider set
         const keys: Record<string, string> = {}
+        const authSet = new Set<string>()
         for (const p of d.providers || []) {
+          if (p.authenticated) authSet.add(p.id)
           const envKey = p.envKeys?.[0]
           if (!p.configured || !envKey) continue
           keys[envKey] = p.maskedCredentials?.[envKey] || '••••'
         }
         setConfiguredKeys(keys)
+        setAuthenticatedProviderIds(authSet)
         // Load custom provider config (may be stored as 'custom' or legacy 'manifest')
         const cfgProviders = (d.config?.providers as Record<string, any>) || {}
         const customCfg = cfgProviders['custom'] || cfgProviders['manifest'] || {}
@@ -417,12 +367,15 @@ function HermesContent() {
       setCustomModel(d.activeModel)
     }
     const keys: Record<string, string> = {}
+    const authSet = new Set<string>()
     for (const p of d.providers || []) {
+      if (p.authenticated) authSet.add(p.id)
       const envKey = p.envKeys?.[0]
       if (!p.configured || !envKey) continue
       keys[envKey] = p.maskedCredentials?.[envKey] || '••••'
     }
     setConfiguredKeys(keys)
+    setAuthenticatedProviderIds(authSet)
   }
 
   const save = async (
@@ -458,13 +411,11 @@ function HermesContent() {
     if (providerId !== activeProvider) setActiveModel('')
     setActiveProvider(providerId)
     if (model) setActiveModel(model)
-    else fetchModelsForProvider(providerId)
   }
 
   const clearProviderPreview = () => {
     setActiveProvider('')
     setActiveModel('')
-    setAvailableModels([])
   }
 
   const abortOAuth = () => {
@@ -497,7 +448,6 @@ function HermesContent() {
     setOauthProviderId(null)
     setLocalProviderId(null)
     setActiveProvider('custom')
-    setAvailableModels([])
     setMsg(null)
   }
 
@@ -662,9 +612,7 @@ function HermesContent() {
             // check is wired. Local providers require live discovery hit.
             const verified =
               (p.authType === 'none' && localOnline) ||
-              (p.authType === 'api_key' &&
-                !!p.envKey &&
-                !!configuredKeys[p.envKey])
+              authenticatedProviderIds.has(p.id)
             const missingKey =
               p.authType === 'api_key' && !verified && p.id !== 'custom'
             // hasKey gates click — keep OAuth + local clickable (existing
@@ -725,9 +673,10 @@ function HermesContent() {
                       (lp) => lp.id === p.id,
                     )
                     if (disc?.online) return '🟢 Detected'
+                    if (verified) return p.authType === 'oauth' ? 'Connected' : 'Key set'
                     if (p.authType === 'oauth') return 'OAuth'
                     if (p.authType === 'none') return 'Local'
-                    return hasKey ? 'Key set' : 'Key required'
+                    return 'Key required'
                   })()}
                 </span>
               </button>
@@ -898,39 +847,39 @@ function HermesContent() {
           </p>
           <div className="flex flex-wrap gap-2">
             {(() => {
-              if (availableModels.length > 0) return availableModels
-              // Use auto-discovered models for local providers
-              const discovered = localDiscovery?.models
-                .filter((m) => m.provider === activeProvider)
-                .map((m) => m.id)
-              if (discovered && discovered.length > 0) return discovered
-              return (
-                PROVIDER_CARDS.find((p) => p.id === activeProvider)?.models ||
-                []
-              )
-            })().map((model) => (
-              <button
-                key={model}
-                type="button"
-                aria-pressed={activeModel === model}
-                onClick={() => setActiveModel(model)}
-                className={cn(
-                  'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
-                  activeModel === model
-                    ? 'ring-2 ring-accent-500'
-                    : 'hover:brightness-110',
-                  defaultProvider === activeProvider && defaultModelId === model
-                    ? 'border border-accent-500/40'
-                    : '',
-                )}
-                style={cardStyle}
-              >
-                {model}
-                {defaultProvider === activeProvider && defaultModelId === model
-                  ? ' · default'
-                  : ''}
-              </button>
-            ))}
+              const models = getModelsForProvider(activeProvider)
+              return catalog.isLoading ? (
+                <p className="text-xs" style={mutedStyle}>Loading models…</p>
+              ) : models.length > 0 ? (
+                models.map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  aria-pressed={activeModel === model}
+                  onClick={() => setActiveModel(model)}
+                  className={cn(
+                    'rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
+                    activeModel === model
+                      ? 'ring-2 ring-accent-500'
+                      : 'hover:brightness-110',
+                    defaultProvider === activeProvider && defaultModelId === model
+                      ? 'border border-accent-500/40'
+                      : '',
+                  )}
+                  style={cardStyle}
+                >
+                  {model}
+                  {defaultProvider === activeProvider && defaultModelId === model
+                    ? ' · default'
+                    : ''}
+                </button>
+              ))
+            ) : (
+              <p className="text-xs rounded-lg px-3 py-2" style={{ ...cardStyle, ...mutedStyle }}>
+                No models available — configure your API key and restart Hermes Agent.
+              </p>
+            )
+            })()}
           </div>
           {activeModel &&
           (activeProvider !== defaultProvider || activeModel !== defaultModelId) ? (
@@ -2094,7 +2043,7 @@ function AgentBehaviorContent() {
   useEffect(() => {
     fetch('/api/hermes-config')
       .then((r) => r.json())
-      .then((d: any) => {
+      .then((d: Record<string, unknown>) => {
         setConfig((d.config?.agent as Record<string, unknown>) || {})
       })
       .catch(() => {})
@@ -2184,7 +2133,7 @@ function VoiceContent() {
   useEffect(() => {
     fetch('/api/hermes-config')
       .then((r) => r.json())
-      .then((d: any) => {
+      .then((d: Record<string, unknown>) => {
         setTts((d.config?.tts as Record<string, unknown>) || {})
         setStt((d.config?.stt as Record<string, unknown>) || {})
       })
@@ -2354,7 +2303,7 @@ function DisplayContent() {
   useEffect(() => {
     fetch('/api/hermes-config')
       .then((r) => r.json())
-      .then((d: any) => {
+      .then((d: Record<string, unknown>) => {
         setConfig((d.config?.display as Record<string, unknown>) || {})
       })
       .catch(() => {})
