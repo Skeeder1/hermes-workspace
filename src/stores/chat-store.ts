@@ -396,7 +396,7 @@ function stripFinalTagsFromMessage(msg: ChatMessage): ChatMessage {
   if (Array.isArray(msg.content)) {
     const nextContent = msg.content.map((part) => {
       if (part.type !== 'text') return part
-      const raw = (part as any).text ?? ''
+      const raw = part.text ?? ''
       const stripped = stripFinalTags(
         typeof raw === 'string' ? raw : String(raw),
       )
@@ -567,9 +567,7 @@ function isExternalInboundUserSource(source: unknown): boolean {
 
 function getAttachmentSignature(msg: ChatMessage | null | undefined): string {
   if (!msg) return ''
-  const attachments = Array.isArray((msg as any).attachments)
-    ? ((msg as any).attachments as Array<Record<string, unknown>>)
-    : []
+  const attachments = Array.isArray(msg.attachments) ? msg.attachments : []
   if (attachments.length === 0) return ''
   return attachments
     .map((attachment) => {
@@ -598,12 +596,12 @@ function messageMultipartSignature(
     ? msg.content
         .map((part) => {
           if (part.type === 'text')
-            return `t:${String((part as any).text ?? '').trim()}`
+            return `t:${String(part.text ?? '').trim()}`
           if (part.type === 'thinking')
-            return `h:${String((part as any).thinking ?? '').trim()}`
+            return `h:${String(part.thinking ?? '').trim()}`
           if (part.type === 'toolCall')
-            return `tc:${String((part as any).id ?? '')}:${String((part as any).name ?? '')}`
-          return `p:${String((part as any).type ?? '')}`
+            return `tc:${String(part.id ?? '')}:${String(part.name ?? '')}`
+          return `p:${String(part.type ?? '')}`
         })
         .join('|')
     : ''
@@ -619,10 +617,10 @@ function messageMultipartSignature(
       }
     }
   }
-  const attachments = Array.isArray((msg as any).attachments)
-    ? (msg as any).attachments
+  const attachments = Array.isArray(msg.attachments)
+    ? msg.attachments
         .map(
-          (attachment: any) =>
+          (attachment) =>
             `${String(attachment?.name ?? '')}:${String(attachment?.size ?? '')}:${String(attachment?.contentType ?? '')}`,
         )
         .join('|')

@@ -7,7 +7,7 @@ import {
   textFromMessage,
 } from '../utils'
 import { MessageActionsBar } from './message-actions-bar'
-import type { ChatAttachment, ChatMessage, ToolCallContent } from '../types'
+import type { ChatAttachment, ChatMessage, ImageContent, TextContent, ToolCallContent } from '../types'
 import type { ToolPart } from '@/components/prompt-kit/tool'
 import { AssistantAvatar, UserAvatar } from '@/components/avatars'
 import { CodeBlock } from '@/components/prompt-kit/code-block'
@@ -36,6 +36,7 @@ import {
   shouldAutoExpandHermesActivityCard,
 } from './streaming-activity-ui'
 import { TuiActivityCard } from './tui-activity-card'
+import { readAnyNumberOrNull } from '@/lib/parse-utils'
 
 const WORDS_PER_TICK = 4
 const TICK_INTERVAL_MS = 50
@@ -248,8 +249,8 @@ function extractToolResultText(msg: ChatMessage | undefined): string {
   // Prefer text from content blocks (exec stdout, Read output, etc.)
   if (Array.isArray(msg.content)) {
     const text = msg.content
-      .filter((b: any) => b?.type === 'text' && b?.text)
-      .map((b: any) => b.text as string)
+      .filter((b): b is TextContent => b?.type === 'text' && typeof b?.text === 'string')
+      .map((b) => b.text as string)
       .join('\n')
     if (text.trim()) return text
   }
@@ -354,11 +355,11 @@ function normalizeTimestamp(value: unknown): number | null {
 
 function rawTimestamp(message: ChatMessage): number | null {
   const candidates = [
-    (message as any).createdAt,
-    (message as any).created_at,
-    (message as any).timestamp,
-    (message as any).time,
-    (message as any).ts,
+    message.createdAt,
+    message.created_at,
+    message.timestamp,
+    message.time,
+    message.ts,
   ]
   for (const candidate of candidates) {
     const normalized = normalizeTimestamp(candidate)
@@ -433,7 +434,7 @@ export function detectAssistantCorruptionWarning(
 }
 
 function readExecNotification(message: ChatMessage): ExecNotification | null {
-  const raw = (message as any).__execNotification as
+  const raw = message.__execNotification as
     | Record<string, unknown>
     | undefined
   if (!raw || typeof raw !== 'object') return null
@@ -560,14 +561,7 @@ function formatToolDisplayLabel(
   return lowerName.replace(/_/g, ' ')
 }
 
-function readNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return null
-}
+const readNumber = readAnyNumberOrNull
 
 function readPercent(value: unknown): number | null {
   const numeric = readNumber(value)
@@ -2190,12 +2184,12 @@ function MessageItemComponent({
   const inlineImages = useMemo(() => {
     const parts = Array.isArray(message.content) ? message.content : []
     return parts
-      .filter((p: any) => p.type === 'image' && p.source)
-      .map((p: any, i: number) => {
+      .filter((p): p is ImageContent => p?.type === 'image')
+      .map((p, i) => {
         const src =
           p.source?.type === 'base64' && p.source?.data
             ? `data:${p.source.media_type || 'image/jpeg'};base64,${p.source.data}`
-            : p.source?.url || p.url || ''
+            : (p.source as { url?: string } | undefined)?.url || p.url || ''
         return { id: `inline-img-${i}`, src }
       })
       .filter((img) => img.src.length > 0)
@@ -2216,18 +2210,21 @@ function MessageItemComponent({
   // Get tool calls from this message (for assistant messages)
   const toolCalls = role === 'assistant' ? getToolCallsFromMessage(message) : []
   const embeddedStreamToolCalls = useMemo(() => {
-    const value = (message as any).__streamToolCalls
+    const value = message.__streamToolCalls
     if (!Array.isArray(value)) return []
     return value
-      .map((entry: any) => ({
-        id: typeof entry?.id === 'string' ? entry.id : '',
-        name: typeof entry?.name === 'string' ? entry.name : 'tool',
-        phase: normalizeStreamToolPhase(entry?.phase),
-        args: entry?.args,
-        preview: typeof entry?.preview === 'string' ? entry.preview : undefined,
-        result: typeof entry?.result === 'string' ? entry.result : undefined,
-      }))
-      .filter((entry: any) => entry.id.length > 0)
+      .map((entry: unknown) => {
+        const e = entry as Record<string, unknown>
+        return {
+          id: typeof e?.id === 'string' ? e.id : '',
+          name: typeof e?.name === 'string' ? e.name : 'tool',
+          phase: normalizeStreamToolPhase(e?.phase),
+          args: e?.args,
+          preview: typeof e?.preview === 'string' ? e.preview : undefined,
+          result: typeof e?.result === 'string' ? e.result : undefined,
+        }
+      })
+      .filter((entry) => entry.id.length > 0)
   }, [message])
   const effectiveStreamToolCalls =
     streamToolCalls.length > 0 ? streamToolCalls : embeddedStreamToolCalls
@@ -2297,8 +2294,8 @@ function MessageItemComponent({
           parseToolNameFromMessageText(messageText)
         return {
           key:
-            (typeof (toolMessage as any).id === 'string' &&
-              (toolMessage as any).id) ||
+            (typeof toolMessage.id === 'string' &&
+              toolMessage.id) ||
             (typeof toolMessage.toolCallId === 'string' &&
               toolMessage.toolCallId) ||
             `${toolType}-${index}`,
@@ -2534,7 +2531,7 @@ function MessageItemComponent({
         </div>
       )}
       {/* Narration messages (tool-call activity) — compact collapsible row */}
-      {!isUser && (message as any).__isNarration && hasText && (
+      {!isUser && Boolean(message.__isNarration) && hasText && (
         <div className="w-full max-w-[var(--chat-content-max-width)]">
           <details className="group/narration rounded-lg border border-primary-200/50 bg-primary-50/30 hover:bg-primary-50 dark:hover:bg-primary-800/50 transition-colors">
             <summary className="flex items-center gap-2 cursor-pointer select-none px-3 py-2 list-none [&::-webkit-details-marker]:hidden">
@@ -2560,7 +2557,7 @@ function MessageItemComponent({
       )}
       {/* Tool calls now render inline inside the assistant bubble, not above it */}
 
-      {shouldRenderMessageBubble && !(message as any).__isNarration && (
+      {shouldRenderMessageBubble && !Boolean(message.__isNarration) && (
         <Message
           className={cn('gap-2 md:gap-3', isUser ? 'flex-row-reverse' : '')}
         >

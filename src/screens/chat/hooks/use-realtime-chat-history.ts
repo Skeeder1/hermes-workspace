@@ -185,7 +185,8 @@ export function useRealtimeChatHistory({
       [backfillHistory],
     ),
     onUserMessage: useCallback(
-      (message: ChatMessage, source?: string) => {
+      (rawMessage: unknown, source?: string) => {
+        const message = rawMessage as ChatMessage
         // Filter internal system messages (pre-compaction flushes, heartbeat
         // prompts, subagent announcements) — these should never appear in the
         // chat UI. The chat-store has its own filter, but this callback
@@ -239,9 +240,9 @@ export function useRealtimeChatHistory({
                 effectiveSessionKey,
               )
               const cached =
-                queryClient.getQueryData<Record<string, unknown>>(key)
-              const existing = (cached?.messages ?? []) as Array<any>
-              const hasOptimistic = existing.some((m: any) => {
+                queryClient.getQueryData<{ messages?: Array<ChatMessage> }>(key)
+              const existing = cached?.messages ?? []
+              const hasOptimistic = existing.some((m) => {
                 if (m.role !== 'user') return false
                 const isOptimistic =
                   typeof m.__optimisticId === 'string' &&
@@ -292,11 +293,9 @@ export function useRealtimeChatHistory({
       ],
     ),
     onDone: useCallback(
-      (
-        _state: string,
-        eventSessionKey: string,
-        streamingSnapshot: StreamingState | null,
-      ) => {
+      (...args: Array<unknown>) => {
+        const eventSessionKey = args[1] as string
+        const streamingSnapshot = (args[2] ?? null) as StreamingState | null
         const currentState =
           eventSessionKey === effectiveSessionKey ? streamingSnapshot : null
         if (currentState?.text) {
@@ -361,7 +360,8 @@ export function useRealtimeChatHistory({
       ],
     ),
     onCompaction: useCallback(
-      (event: CompactionEvent) => {
+      (...rawArgs: Array<unknown>) => {
+        const event = rawArgs[0] as CompactionEvent
         if (!event.sessionKey || event.sessionKey !== effectiveSessionKey)
           return
 

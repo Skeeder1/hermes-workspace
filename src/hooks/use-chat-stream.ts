@@ -6,12 +6,12 @@ export function useChatStream(_opts: {
   enabled?: boolean
   onReconnect?: () => void
   onSilentTimeout?: (ms: number) => void
-  onUserMessage?: (message: any, source?: string) => void
+  onUserMessage?: (message: unknown, source?: string) => void
   onApprovalRequest?: (approval: Record<string, unknown>) => void
   onCompactionStart?: () => void
   onCompactionEnd?: () => void
-  onCompaction?: (...args: Array<any>) => void
-  onDone?: (...args: Array<any>) => void
+  onCompaction?: (...args: Array<unknown>) => void
+  onDone?: (...args: Array<unknown>) => void
 }) {
   return {
     connectionState: 'connected' as const,

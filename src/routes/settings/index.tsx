@@ -1,4 +1,4 @@
-import { HugeiconsIcon } from '@hugeicons/react'
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import {
   CheckmarkCircle02Icon,
   CloudIcon,
@@ -249,7 +249,7 @@ function WorkspaceThemePicker() {
 type SectionProps = {
   title: string
   description: string
-  icon: React.ComponentProps<typeof HugeiconsIcon>['icon']
+  icon: IconSvgElement
   children: React.ReactNode
 }
 
@@ -320,9 +320,9 @@ function SettingsRoute() {
         const data = await res.json()
         const models = Array.isArray(data.models) ? data.models : []
         setAvailableModels(
-          models.map((m: any) => ({
-            id: m.id || '',
-            label: m.id?.split('/').pop() || m.id || '',
+          (models as Array<Record<string, unknown>>).map((m) => ({
+            id: typeof m.id === 'string' ? m.id : '',
+            label: typeof m.id === 'string' ? (m.id.split('/').pop() || m.id) : '',
           })),
         )
       } catch {

@@ -20,6 +20,7 @@ import {
   readError,
   textFromMessage,
 } from './utils'
+import type { GatewayModelsResponse } from '@/lib/gateway-api'
 import {
   advanceStickyStreamingText,
   createResponseWaitSnapshot,
@@ -85,6 +86,7 @@ import {
 } from '@/screens/gateway/lib/approvals-store'
 import { stripQueuedWrapper } from '@/lib/strip-queued-wrapper'
 import { cn } from '@/lib/utils'
+import { toErrorMessage } from '@/lib/error-utils'
 import { toast } from '@/components/ui/toast'
 import { hapticTap } from '@/lib/haptics'
 import { FileExplorerSidebar } from '@/components/file-explorer'
@@ -106,6 +108,7 @@ import { useResearchCard } from '@/hooks/use-research-card'
 import { useTapDebug } from '@/hooks/use-tap-debug'
 import { useChatMode } from '@/hooks/use-chat-mode'
 import { useChatActivityStore, type AgentActivity } from '@/stores/chat-activity-store'
+import { normalizeMimeType, isImageMimeType } from '@/lib/mime-utils'
 
 type ChatScreenProps = {
   activeFriendlyId: string
@@ -130,15 +133,6 @@ type PortableHistoryMessage = {
   content: string
 }
 
-function normalizeMimeType(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return value.trim().toLowerCase()
-}
-
-function isImageMimeType(value: unknown): boolean {
-  const normalized = normalizeMimeType(value)
-  return normalized.startsWith('image/')
-}
 
 function readDataUrlMimeType(value: unknown): string {
   if (typeof value !== 'string') return ''
@@ -188,7 +182,7 @@ function buildPortableHistory(
         message.role === 'assistant' ||
         message.role === 'system',
     )
-    .filter((message) => (message as any).__streamingStatus !== 'streaming')
+    .filter((message) => message.__streamingStatus !== 'streaming')
     .map((message) => {
       const content = getPortableHistoryContent(message)
       if (!content) return null
@@ -264,7 +258,7 @@ function messageFallbackSignature(message: ChatMessage): string {
 
   const contentParts = Array.isArray(message.content)
     ? message.content
-        .map((part: any) => {
+        .map((part) => {
           if (part.type === 'text') {
             return `t:${typeof part.text === 'string' ? part.text.trim() : ''}`
           }
@@ -272,8 +266,7 @@ function messageFallbackSignature(message: ChatMessage): string {
             return `th:${typeof part.thinking === 'string' ? part.thinking : ''}`
           }
           if (part.type === 'toolCall') {
-            const toolPart = part
-            return `tc:${toolPart.id ?? ''}:${toolPart.name ?? ''}`
+            return `tc:${part.id ?? ''}:${part.name ?? ''}`
           }
           return `p:${part.type ?? ''}`
         })
@@ -567,10 +560,20 @@ export function ChatScreen({
     activeSessionKey,
     activeTitle,
     sessionsError,
-    sessionsLoading: _sessionsLoading,
-    sessionsFetching: _sessionsFetching,
-    refetchSessions: _refetchSessions,
+    sessionsLoading,
+    sessionsFetching,
+    refetchSessions,
   } = useChatSessions({ activeFriendlyId, isNewChat, forcedSessionKey })
+
+  const handleOpenSessions = useCallback(() => {
+    setSessionsOpen(true)
+    void refetchSessions()
+  }, [refetchSessions])
+
+  const handleRetrySessions = useCallback(() => {
+    void refetchSessions()
+  }, [refetchSessions])
+
   const {
     historyQuery,
     historyMessages,
@@ -845,9 +848,7 @@ export function ChatScreen({
     // Snapshot any unconfirmed optimistic user messages BEFORE refetch.
     // The refetch replaces the query cache with server data — if the server
     // hasn't processed the user's POST yet, the optimistic message vanishes.
-    const currentMessages = (historyQuery.data as any)?.messages as
-      | Array<ChatMessage>
-      | undefined
+    const currentMessages = historyQuery.data?.messages
     const pendingOptimistic = (currentMessages ?? []).filter((msg) => {
       const raw = msg as Record<string, unknown>
       return (
@@ -939,11 +940,10 @@ export function ChatScreen({
   // Phase 4.1: Smart Model Suggestions
   const modelsQuery = useQuery({
     queryKey: ['models'],
-    queryFn: async () => {
+    queryFn: async (): Promise<GatewayModelsResponse> => {
       const res = await fetch('/api/models')
       if (!res.ok) return { models: [] }
-      const data = await res.json()
-      return data
+      return res.json() as Promise<GatewayModelsResponse>
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
@@ -982,7 +982,9 @@ export function ChatScreen({
 
   const availableModelIds = useMemo(() => {
     const models = modelsQuery.data?.models || []
-    return models.map((m: any) => m.id).filter((id: string) => id)
+    return models
+      .map((m) => typeof m === 'string' ? m : m.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
   }, [modelsQuery.data])
 
   const gatewayModel = currentModelQuery.data || ''
@@ -1245,13 +1247,13 @@ export function ChatScreen({
       }
       if (msg.role === 'assistant') {
         if (msg.__streamingStatus === 'streaming') return true
-        if ((msg as any).__optimisticId && !msg.content?.length) return true
+        if (msg.__optimisticId && !msg.content?.length) return true
         if (textFromMessage(msg).trim().length > 0) return true
         const content = Array.isArray(msg.content) ? msg.content : []
         const hasToolCalls = content.some((part) => part.type === 'toolCall')
         const hasStreamToolCalls =
-          Array.isArray((msg as any).__streamToolCalls) &&
-          (msg as any).__streamToolCalls.length > 0
+          Array.isArray(msg.__streamToolCalls) &&
+          (msg.__streamToolCalls as unknown[]).length > 0
         return hasToolCalls || hasStreamToolCalls
       }
       return false
@@ -1383,23 +1385,22 @@ export function ChatScreen({
       const id = isPortableMode
         ? localStreamingMessageId
         : last?.role === 'assistant'
-          ? (last as any).__optimisticId || (last as any).id || null
+          ? last.__optimisticId || last.id || null
           : null
-      return { isStreaming: true, streamingMessageId: id }
+      return { isStreaming: true, streamingMessageId: id as string | null }
     }
     if (waitingForResponse && finalDisplayMessages.length > 0) {
       const last = finalDisplayMessages[finalDisplayMessages.length - 1]
       if (last && last.role === 'assistant') {
-        const isStreamingPlaceholder =
-          (last as any).__streamingStatus === 'streaming'
+        const isStreamingPlaceholder = last.__streamingStatus === 'streaming'
         if (!isStreamingPlaceholder) {
           return {
             isStreaming: false,
             streamingMessageId: null as string | null,
           }
         }
-        const id = (last as any).__optimisticId || (last as any).id || null
-        return { isStreaming: true, streamingMessageId: id }
+        const id = last.__optimisticId || last.id || null
+        return { isStreaming: true, streamingMessageId: id as string | null }
       }
     }
     return { isStreaming: false, streamingMessageId: null as string | null }
@@ -1479,7 +1480,7 @@ export function ChatScreen({
       }
     } catch (err) {
       setError(
-        `Failed to switch model. ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to switch model. ${toErrorMessage(err)}`,
       )
     }
   }, [suggestion, resolvedSessionKey, dismiss])
@@ -1912,7 +1913,7 @@ export function ChatScreen({
         model: currentModel || undefined,
         idempotencyKey: optimisticClientId || crypto.randomUUID(),
       }).catch((err: unknown) => {
-        const messageText = err instanceof Error ? err.message : String(err)
+        const messageText = toErrorMessage(err)
         if (import.meta.env.DEV) {
           console.warn('[chat] send-stream failed', messageText)
         }
@@ -1944,11 +1945,9 @@ export function ChatScreen({
       pending.friendlyId,
       pending.sessionKey,
     )
-    const cached = queryClient.getQueryData(historyKey)
-    const cachedMessages = Array.isArray((cached as any)?.messages)
-      ? (cached as any).messages
-      : []
-    const alreadyHasOptimistic = cachedMessages.some((message: any) => {
+    const cached = queryClient.getQueryData<{ messages?: Array<ChatMessage> }>(historyKey)
+    const cachedMessages = Array.isArray(cached?.messages) ? cached.messages : []
+    const alreadyHasOptimistic = cachedMessages.some((message) => {
       if (pending.optimisticMessage.clientId) {
         if (message.clientId === pending.optimisticMessage.clientId) return true
         if (message.__optimisticId === pending.optimisticMessage.clientId)
@@ -2607,7 +2606,7 @@ export function ChatScreen({
               onRenameTitle={handleRenameActiveSessionTitle}
               renamingTitle={renamingSessionTitle}
               wrapperRef={headerRef}
-              onOpenSessions={() => setSessionsOpen(true)}
+              onOpenSessions={handleOpenSessions}
               sessions={sessions ?? []}
               activeFriendlyId={activeFriendlyId}
               onSelectSession={(key) =>
@@ -2789,6 +2788,10 @@ export function ChatScreen({
           onClose={() => setSessionsOpen(false)}
           sessions={sessions}
           activeFriendlyId={activeFriendlyId}
+          loading={sessionsLoading}
+          fetching={sessionsFetching}
+          error={sessionsError}
+          onRetry={handleRetrySessions}
           onSelectSession={(friendlyId) => {
             setSessionsOpen(false)
             void navigate({

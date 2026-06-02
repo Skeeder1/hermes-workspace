@@ -27,7 +27,17 @@ export type ThinkingContent = {
   thinkingSignature?: string
 }
 
-export type MessageContent = TextContent | ToolCallContent | ThinkingContent
+export type ImageSource =
+  | { type: 'base64'; media_type?: string; data?: string }
+  | { type: 'url'; url?: string }
+
+export type ImageContent = {
+  type: 'image'
+  source?: ImageSource
+  url?: string
+}
+
+export type MessageContent = TextContent | ToolCallContent | ThinkingContent | ImageContent
 
 export type ChatAttachment = {
   id?: string
@@ -77,7 +87,11 @@ export type SessionSummary = {
 }
 
 export type SessionListResponse = {
+  ok?: boolean
   sessions?: Array<SessionSummary>
+  source?: string
+  message?: string
+  error?: string
 }
 
 export type HistoryResponse = {

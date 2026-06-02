@@ -14,6 +14,7 @@ import {
   updateSession,
 } from '../../server/claude-api'
 import { createCapabilityUnavailablePayload } from '@/lib/feature-gates'
+import { toErrorMessage } from '@/lib/error-utils'
 import {
   deleteLocalSession,
   getLocalSession,
@@ -21,22 +22,30 @@ import {
   updateLocalSessionTitle,
 } from '../../server/local-session-store'
 
+const NO_STORE = { headers: { 'Cache-Control': 'no-store' } } as const
+
 export const Route = createFileRoute('/api/sessions')({
   server: {
     handlers: {
       GET: async ({ request }) => {
         // Auth check
         if (!isAuthenticated(request)) {
-          return json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+          return json(
+            { ok: false, error: 'Unauthorized' },
+            { status: 401, ...NO_STORE },
+          )
         }
         const capabilities = await ensureGatewayProbed()
         if (!capabilities.sessions) {
-          return json({
-            ok: true,
-            sessions: [],
-            source: 'unavailable',
-            message: SESSIONS_API_UNAVAILABLE_MESSAGE,
-          })
+          return json(
+            {
+              ok: true,
+              sessions: [],
+              source: 'unavailable',
+              message: SESSIONS_API_UNAVAILABLE_MESSAGE,
+            },
+            NO_STORE,
+          )
         }
 
         try {
@@ -45,7 +54,7 @@ export const Route = createFileRoute('/api/sessions')({
 
           // Merge local portable sessions (Ollama, Atomic Chat, etc.)
           const localSessions = listLocalSessions()
-          const gatewayIds = new Set(gatewaySessions.map((s: any) => s.key || s.id))
+          const gatewayIds = new Set(gatewaySessions.map((s) => s.key || s.id))
           for (const ls of localSessions) {
             if (!gatewayIds.has(ls.id)) {
               gatewaySessions.push({
@@ -64,13 +73,13 @@ export const Route = createFileRoute('/api/sessions')({
             }
           }
 
-          return json({ sessions: gatewaySessions })
+          return json({ sessions: gatewaySessions }, NO_STORE)
         } catch (err) {
           return json(
             {
-              error: err instanceof Error ? err.message : String(err),
+              error: toErrorMessage(err),
             },
-            { status: 500 },
+            { status: 500, ...NO_STORE },
           )
         }
       },
@@ -148,7 +157,7 @@ export const Route = createFileRoute('/api/sessions')({
           return json(
             {
               ok: false,
-              error: err instanceof Error ? err.message : String(err),
+              error: toErrorMessage(err),
             },
             { status: 500 },
           )
@@ -254,7 +263,7 @@ export const Route = createFileRoute('/api/sessions')({
           return json(
             {
               ok: false,
-              error: err instanceof Error ? err.message : String(err),
+              error: toErrorMessage(err),
             },
             { status: 500 },
           )
@@ -300,7 +309,7 @@ export const Route = createFileRoute('/api/sessions')({
           return json(
             {
               ok: false,
-              error: err instanceof Error ? err.message : String(err),
+              error: toErrorMessage(err),
             },
             { status: 500 },
           )

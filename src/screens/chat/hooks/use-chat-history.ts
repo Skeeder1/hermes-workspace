@@ -330,9 +330,9 @@ export function useChatHistory({
         return readPortableHistory()
       }
 
-      const cached = queryClient.getQueryData(historyKey)
-      const optimisticMessages = Array.isArray((cached as any)?.messages)
-        ? (cached as any).messages.filter((message: any) => {
+      const cached = queryClient.getQueryData<{ messages?: Array<ChatMessage> }>(historyKey)
+      const optimisticMessages = Array.isArray(cached?.messages)
+        ? cached.messages.filter((message) => {
           if (message.status === 'sending') return true
           if (message.__optimisticId) return true
           return Boolean(message.clientId)
@@ -487,11 +487,11 @@ export function useChatHistory({
         const text = textFromMessage(msg)
         const execNotification = parseExecNotification(text)
         if (execNotification) {
-          ; (msg as any).__execNotification = execNotification
+          ; msg.__execNotification = execNotification
           return true
         }
-        if ((msg as any).__execNotification) {
-          delete (msg as any).__execNotification
+        if (msg.__execNotification) {
+          delete msg.__execNotification
         }
         // Filter out system event forwards (subagent task announcements etc)
         if (text.startsWith('A subagent task')) return false
@@ -547,20 +547,15 @@ export function useChatHistory({
       const msg = filtered[i]
       if (msg.role !== 'assistant') continue
       const content = Array.isArray(msg.content) ? msg.content : []
-      const hasToolCall = content.some(
-        (c: any) =>
-          c.type === 'toolCall' ||
-          c.type === 'tool_use' ||
-          c.type === 'toolUse',
-      )
+      const hasToolCall = content.some((c) => {
+        const t = c.type as string
+        return t === 'toolCall' || t === 'tool_use' || t === 'toolUse'
+      })
       if (!hasToolCall) continue
 
       // Check if this message has substantial text (not just empty/whitespace)
       const substantialText = content.some(
-        (c: any) =>
-          c.type === 'text' &&
-          typeof c.text === 'string' &&
-          c.text.trim().length > 20,
+        (c) => c.type === 'text' && typeof c.text === 'string' && c.text.trim().length > 20,
       )
       // If it has real text content, it's a response — never hide it
       if (substantialText) continue
@@ -574,7 +569,7 @@ export function useChatHistory({
           filtered.splice(i, 1)
           i--
         } else {
-          ; (msg as any).__isNarration = true
+          ; msg.__isNarration = true
         }
       }
     }

@@ -78,6 +78,8 @@ export type GatewayModelsResponse = {
   models?: Array<GatewayModelCatalogEntry>
   configuredProviders?: Array<string>
   error?: string
+  streamAcceptedTimeoutMs?: number
+  streamHandoffTimeoutMs?: number
 }
 
 export type GatewayModelSwitchResponse = {

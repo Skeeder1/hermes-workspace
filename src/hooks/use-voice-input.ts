@@ -23,13 +23,31 @@ type UseVoiceInputReturn = {
   toggle: () => void
 }
 
-type SpeechRecognitionInstance = any
+type SpeechRecognitionResultEntry = { transcript: string; confidence: number }
+type SpeechRecognitionResult = { isFinal: boolean; [index: number]: SpeechRecognitionResultEntry }
+type SpeechRecognitionResultList = { length: number; [index: number]: SpeechRecognitionResult }
+type SpeechRecognitionEvent = { resultIndex: number; results: SpeechRecognitionResultList }
+type SpeechRecognitionErrorEvent = { error: string }
+
+type SpeechRecognitionInstance = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  maxAlternatives: number
+  onstart: (() => void) | null
+  onresult: ((event: SpeechRecognitionEvent) => void) | null
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+  abort: () => void
+}
 type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
 
 function getSpeechRecognition(): SpeechRecognitionConstructor | null {
   if (typeof window === 'undefined') return null
 
-  const win = window as any
+  const win = window as Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
   return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null
 }
 
@@ -216,7 +234,7 @@ export function useVoiceInput(
       setTranscript('')
     }
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let finalText = ''
       let interimText = ''
 
@@ -241,7 +259,7 @@ export function useVoiceInput(
       }
     }
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === 'aborted' || event.error === 'no-speech') {
         setState('idle')
         return
