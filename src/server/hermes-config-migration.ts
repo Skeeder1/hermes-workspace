@@ -1,8 +1,15 @@
+import {
+  PROVIDER_CATALOG,
+  getModelHints,
+  type ProviderInfo,
+} from '@/lib/provider-catalog'
+
 export type HermesProviderKind = 'oauth' | 'api_key' | 'local' | 'custom'
 
 export type HermesAuthSource =
   | 'env'
   | 'auth-profiles'
+  | 'credential-pool'
   | 'config'
   | 'local-discovery'
   | 'none'
@@ -59,8 +66,9 @@ type ProviderDef = {
   name: string
   kind: HermesProviderKind
   envKeys: Array<string>
-  models: Array<{ id: string; name: string }>
+  aliases: Array<string>
 }
+
 
 type LocalProviderSummary = {
   id: string
@@ -81,22 +89,27 @@ export type NormalizeHermesConfigInput = {
   authProfiles: Record<string, unknown>
   localProviders: Array<LocalProviderSummary>
   localModels: Array<LocalModelSummary>
+  credentialPool?: Set<string>
 }
 
-export const HERMES_PROVIDER_CATALOG: Array<ProviderDef> = [
-  { id: 'nous', name: 'Nous Portal', kind: 'oauth', envKeys: [], models: [] },
-  { id: 'openai-codex', name: 'OpenAI Codex', kind: 'oauth', envKeys: [], models: [] },
-  { id: 'anthropic', name: 'Anthropic', kind: 'api_key', envKeys: ['ANTHROPIC_API_KEY'], models: [] },
-  { id: 'openrouter', name: 'OpenRouter', kind: 'api_key', envKeys: ['OPENROUTER_API_KEY'], models: [] },
-  { id: 'zai', name: 'Z.AI / GLM', kind: 'api_key', envKeys: ['GLM_API_KEY'], models: [] },
-  { id: 'kimi-coding', name: 'Kimi', kind: 'api_key', envKeys: ['KIMI_API_KEY'], models: [] },
-  { id: 'minimax', name: 'MiniMax', kind: 'api_key', envKeys: ['MINIMAX_API_KEY'], models: [] },
-  { id: 'minimax-cn', name: 'MiniMax (China)', kind: 'api_key', envKeys: ['MINIMAX_CN_API_KEY'], models: [] },
-  { id: 'xiaomi', name: 'Xiaomi MiMo', kind: 'api_key', envKeys: ['XIAOMI_API_KEY'], models: [] },
-  { id: 'ollama', name: 'Ollama', kind: 'local', envKeys: [], models: [] },
-  { id: 'atomic-chat', name: 'Atomic Chat', kind: 'local', envKeys: [], models: [] },
-  { id: 'custom', name: 'Custom', kind: 'custom', envKeys: ['CUSTOM_API_KEY'], models: [] },
-]
+function deriveProviderKind(p: ProviderInfo): HermesProviderKind {
+  if (p.id === 'custom') return 'custom'
+  if (p.authTypes.includes('local')) return 'local'
+  if (p.authTypes.includes('oauth') && !p.authTypes.includes('api-key')) {
+    return 'oauth'
+  }
+  return 'api_key'
+}
+
+export const HERMES_PROVIDER_CATALOG: Array<ProviderDef> = PROVIDER_CATALOG.map(
+  (p) => ({
+    id: p.id,
+    name: p.name,
+    kind: deriveProviderKind(p),
+    envKeys: p.apiKeyEnv ? [p.apiKeyEnv] : [],
+    aliases: p.aliases ?? [],
+  }),
+)
 
 const KNOWN_PROVIDER_IDS = new Set(HERMES_PROVIDER_CATALOG.map((p) => p.id))
 
@@ -130,10 +143,15 @@ function readDefaultModel(config: Record<string, unknown>): HermesConfigState['d
   return { provider: nestedProvider, model: nestedModel, source: 'nested' }
 }
 
-function authProfileToken(authProfiles: Record<string, unknown>, providerId: string): string {
+function authProfileToken(
+  authProfiles: Record<string, unknown>,
+  providerId: string,
+  aliases: Array<string> = [],
+): string {
   const profiles = readRecord(authProfiles.profiles)
+  const prefixes = [providerId, ...aliases].map((p) => `${p}:`)
   for (const [key, value] of Object.entries(profiles)) {
-    if (!key.startsWith(`${providerId}:`)) continue
+    if (!prefixes.some((prefix) => key.startsWith(prefix))) continue
     const profile = readRecord(value)
     const token =
       readString(profile.token) ||
@@ -182,7 +200,7 @@ export function normalizeHermesConfigState(input: NormalizeHermesConfigInput): H
     let configured = false
     let authSource: HermesAuthSource = 'none'
     let available = false
-    let models = def.models
+    let models = getModelHints(def.id)
 
     if (def.kind === 'api_key' || def.kind === 'custom') {
       for (const envKey of def.envKeys) {
@@ -198,12 +216,19 @@ export function normalizeHermesConfigState(input: NormalizeHermesConfigInput): H
     }
 
     if (def.kind === 'oauth') {
-      const token = authProfileToken(input.authProfiles, def.id)
+      const token = authProfileToken(input.authProfiles, def.id, def.aliases)
       if (token) {
         authenticated = true
         configured = true
         authSource = 'auth-profiles'
         maskedCredentials['auth-profiles'] = maskSecret(token)
+      } else if (input.credentialPool) {
+        const inPool = [def.id, ...def.aliases].some((id) => input.credentialPool!.has(id))
+        if (inPool) {
+          authenticated = true
+          configured = true
+          authSource = 'credential-pool'
+        }
       }
       available = configured
     }

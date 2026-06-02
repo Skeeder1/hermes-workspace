@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import YAML from 'yaml'
 
+import { PROVIDER_CATALOG } from '@/lib/provider-catalog'
 import type { HermesConfigPaths } from './hermes-config-migration'
 
 export type SetDefaultModelPatch = {
@@ -159,6 +160,18 @@ export function readHermesConfigFiles(paths: HermesConfigPaths): HermesConfigFil
   }
 }
 
+export function readCredentialPool(hermesHome: string): Set<string> {
+  try {
+    const raw = fs.readFileSync(path.join(hermesHome, 'auth.json'), 'utf-8')
+    const data = JSON.parse(raw)
+    const pool = data?.credential_pool
+    if (!pool || typeof pool !== 'object') return new Set()
+    return new Set(Object.keys(pool))
+  } catch {
+    return new Set()
+  }
+}
+
 function readCustomProvidersList(config: Record<string, unknown>): Array<Record<string, unknown>> {
   const entries = config.custom_providers
   return Array.isArray(entries)
@@ -192,6 +205,21 @@ function applySetDefaultModel(
   return { ok: true }
 }
 
+/**
+ * Look up a provider in PROVIDER_CATALOG by its API-key env var. Used to find
+ * the canonical endpoint when an API key is saved.
+ */
+function findProviderByEnvKey(
+  envKey: string,
+): { id: string; baseUrl: string } | null {
+  for (const provider of PROVIDER_CATALOG) {
+    if (provider.apiKeyEnv === envKey && provider.baseUrl) {
+      return { id: provider.id, baseUrl: provider.baseUrl }
+    }
+  }
+  return null
+}
+
 function applySetApiKey(
   paths: HermesConfigPaths,
   patch: SetApiKeyPatch,
@@ -199,6 +227,27 @@ function applySetApiKey(
   const env = readEnv(paths.envPath)
   env[patch.envKey] = patch.value
   writeEnv(paths.envPath, env)
+
+  // When the saved key belongs to a provider with a canonical baseUrl in the
+  // catalog, register it in custom_providers so Hermes Agent routes correctly.
+  // This is generic — adding a baseUrl to any provider in PROVIDER_CATALOG
+  // automatically enables auto-config here, no code change required.
+  if (patch.value) {
+    const match = findProviderByEnvKey(patch.envKey)
+    if (match) {
+      const config = readYamlConfig(paths.configPath)
+      const list = readCustomProvidersList(config)
+      const next = list.filter((e) => e.name !== match.id)
+      next.push({
+        name: match.id,
+        base_url: match.baseUrl,
+        key_env: patch.envKey,
+      })
+      config.custom_providers = next
+      writeYamlConfig(paths.configPath, config)
+    }
+  }
+
   return { ok: true }
 }
 

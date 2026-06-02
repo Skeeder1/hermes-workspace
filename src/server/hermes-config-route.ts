@@ -3,17 +3,15 @@ import path from 'node:path'
 import YAML from 'yaml'
 import { z } from 'zod'
 
-import { createCapabilityUnavailablePayload } from '@/lib/feature-gates'
-
 import { isAuthenticated } from './auth-middleware'
 import {
   ensureGatewayProbed,
-  getCapabilities,
 } from './gateway-capabilities'
 import { normalizeHermesConfigState } from './hermes-config-migration'
 import {
   applyHermesConfigPatch,
   parseEnvFile,
+  readCredentialPool,
   readHermesConfigFiles,
   resolveHermesConfigPaths,
   stringifyEnv,
@@ -78,18 +76,6 @@ async function authorize(request: Request): Promise<AuthResult> {
   return true
 }
 
-function unavailablePayload(extra: Record<string, unknown> = {}): Response {
-  return Response.json({
-    ...createCapabilityUnavailablePayload('config'),
-    config: {},
-    providers: [],
-    customProviders: [],
-    activeProvider: '',
-    activeModel: '',
-    ...extra,
-  })
-}
-
 export async function handleHermesConfigGet({
   request,
 }: {
@@ -99,9 +85,9 @@ export async function handleHermesConfigGet({
   if (auth !== true) return auth
 
   const paths = resolveHermesConfigPaths()
-  if (!getCapabilities().config) {
-    return unavailablePayload({ paths, claudeHome: paths.hermesHome })
-  }
+  // Note: getCapabilities().config gates the REMOTE dashboard config endpoint.
+  // This handler reads ~/.hermes/ files directly from the filesystem and does
+  // not require the dashboard or gateway to be reachable.
 
   await ensureDiscovery()
   const files = readHermesConfigFiles(paths)
@@ -112,6 +98,7 @@ export async function handleHermesConfigGet({
     authProfiles: files.authProfiles,
     localProviders: getDiscoveryStatus(),
     localModels: getDiscoveredModels(),
+    credentialPool: readCredentialPool(paths.hermesHome),
   })
 
   // Legacy /api/claude-config consumers read provider.maskedKeys; alias it.
@@ -199,16 +186,7 @@ export async function handleHermesConfigPatch({
   const auth = await authorize(request)
   if (auth !== true) return auth
 
-  if (!getCapabilities().config) {
-    return new Response(
-      JSON.stringify(
-        createCapabilityUnavailablePayload('config', {
-          error: 'Configuration updates are unavailable on this backend.',
-        }),
-      ),
-      { status: 503, headers: { 'Content-Type': 'application/json' } },
-    )
-  }
+  // Note: config is written directly to ~/.hermes/ filesystem; dashboard not required.
 
   let body: unknown
   try {
