@@ -114,6 +114,36 @@ function readClaudeModelsJson(): Array<ModelEntry> {
 
 const AUTH_JSON_PATH = path.join(CLAUDE_HOME, 'auth.json')
 const CATALOG_CACHE_PATH = path.join(CLAUDE_HOME, 'model-catalog-cache.json')
+const PROVIDER_MODELS_CACHE_PATH = path.join(CLAUDE_HOME, 'provider_models_cache.json')
+
+type ProviderModelsCache = Record<string, {
+  models: string[]
+  at?: number
+  fp?: string
+}>
+
+function readProviderModelsCache(activeProviders: Set<string>): Array<ModelEntry> {
+  try {
+    if (!fs.existsSync(PROVIDER_MODELS_CACHE_PATH)) return []
+    const raw = fs.readFileSync(PROVIDER_MODELS_CACHE_PATH, 'utf-8')
+    const cache = JSON.parse(raw) as ProviderModelsCache
+    const entries: Array<ModelEntry> = []
+    for (const [providerId, info] of Object.entries(cache)) {
+      if (!activeProviders.has(providerId)) continue
+      for (const modelId of info.models ?? []) {
+        if (!modelId) continue
+        entries.push({
+          id: modelId,
+          name: modelId,
+          provider: normalizeProviderId(providerId),
+        })
+      }
+    }
+    return entries
+  } catch {
+    return []
+  }
+}
 const CATALOG_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 type NousModelCatalog = {
@@ -297,50 +327,48 @@ export const Route = createFileRoute('/api/models')({
         await ensureGatewayProbed()
 
         try {
-          // Primary: read user-configured models from ~/.hermes/models.json
-          let models = readClaudeModelsJson()
-          let source = 'models.json'
+          // 1. provider_models_cache.json — first/primary source of truth (live, hermes-agent)
+          const activeProviders = readCredentialPoolProviders()
+          let models = readProviderModelsCache(activeProviders)
+          let source = 'provider_models_cache'
 
-          // Ensure the default model from config.yaml is always first
+          // 2. Merge user-configured models.json
+          const userModels = readClaudeModelsJson()
+          models = mergeModelEntries(models, userModels)
+          if (userModels.length > 0) source = `models.json+${source}`
+
+          // 3. Pin default model from config.yaml at top
           const defaultModel = readClaudeDefaultModel()
           if (defaultModel) {
             models = models.filter((m) => m.id !== defaultModel.id)
             models.unshift(defaultModel)
           }
 
-          // Merge the authoritative Hermes model catalog whenever it is
-          // available. Previously, a non-empty models.json stopped here, so the
-          // Operations picker only showed the local Workspace subset and drifted
-          // from the CLI/backend model universe.
+          // 4. Merge gateway catalog if available
           if (getGatewayCapabilities().models) {
             const hermesModels = await fetchClaudeModels()
             models = mergeModelEntries(models, hermesModels)
-            source = source === 'models.json' ? 'models.json+hermes-agent' : 'hermes-agent'
+            source = `${source}+hermes-agent`
           }
 
-          // Merge auto-discovered local models (Ollama, Atomic Chat, etc.)
+          // 5. NousResearch catalog fallback (OpenRouter + Nous)
+          const catalogConfig = readModelCatalogConfig()
+          if (catalogConfig) {
+            const catalogModels = await fetchNousModelCatalog(
+              catalogConfig.url,
+              activeProviders,
+              catalogConfig.ttlMs,
+            )
+            models = mergeModelEntries(models, catalogModels)
+            if (catalogModels.length > 0) source = `${source}+catalog`
+          }
+
+          // 6. Auto-discovered local models (Ollama, etc.)
           await ensureDiscovery()
           const localModels = getDiscoveredModels()
           models = mergeModelEntries(models, localModels)
           for (const m of localModels) {
             ensureProviderInConfig(m.provider)
-          }
-
-          // Merge NousResearch model catalog (OpenRouter + Nous), filtered by credential pool
-          const catalogConfig = readModelCatalogConfig()
-          if (catalogConfig) {
-            const activeProviders = readCredentialPoolProviders()
-            if (activeProviders.size > 0) {
-              const catalogModels = await fetchNousModelCatalog(
-                catalogConfig.url,
-                activeProviders,
-                catalogConfig.ttlMs,
-              )
-              models = mergeModelEntries(models, catalogModels)
-              if (catalogModels.length > 0) {
-                source = source.includes('catalog') ? source : `${source}+catalog`
-              }
-            }
           }
 
           const configuredProviders = Array.from(
