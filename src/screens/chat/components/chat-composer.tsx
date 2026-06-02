@@ -30,6 +30,7 @@ import { ContextBar } from './context-bar'
 import type { CSSProperties, Ref } from 'react'
 
 import type { ModelCatalogEntry, ModelSwitchResponse } from '@/lib/model-types'
+import { PROVIDER_CATALOG } from '@/lib/provider-catalog'
 import type {
   SlashCommandDefinition,
   SlashCommandMenuHandle,
@@ -47,8 +48,18 @@ import { useWorkspaceStore } from '@/stores/workspace-store'
 import { useSessionModelStore } from '@/stores/session-model-store'
 import { Button } from '@/components/ui/button'
 import { usePinnedModels } from '@/hooks/use-pinned-models'
+import { useModelCatalog } from '@/hooks/use-model-catalog'
 // import { ModeSelector } from '@/components/mode-selector'
 import { cn } from '@/lib/utils'
+import {
+  IMAGE_EXTENSION_TO_MIME,
+  TEXT_EXTENSION_TO_MIME,
+  normalizeMimeType,
+  isImageMimeType,
+  isTextMimeType,
+  inferImageMimeTypeFromFileName,
+  inferTextMimeTypeFromFileName,
+} from '@/lib/mime-utils'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { useVoiceRecorder } from '@/hooks/use-voice-recorder'
 import { toast } from '@/components/ui/toast'
@@ -68,7 +79,7 @@ type ChatComposerAttachment = {
   kind?: 'image' | 'file' | 'audio'
 }
 
-type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'adaptive'
 
 type ChatComposerProps = {
   onSubmit: (
@@ -176,140 +187,12 @@ type ModelSwitchNotice = {
   retryProvider?: string
 }
 
-// Models are fetched through the workspace API proxy (/api/models, /api/claude-proxy)
-// to support Docker and reverse-proxy deployments where the browser cannot reach
-// the Hermes Agent gateway directly.
+// Models are fetched via useModelCatalog() hook (shared with /model dialog).
+// The hook calls /api/models (gateway) + /api/hermes-config (provider auth) + modelHints fallback.
 
-function readModelText(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-type ClaudeCatalogEntry =
-  | string
-  | {
-      id: string
-      provider: string
-      name: string
-      [key: string]: unknown
-    }
-
-function isClaudeCatalogEntry(
-  entry: ClaudeCatalogEntry | null,
-): entry is ClaudeCatalogEntry {
-  return entry !== null
-}
-
-type ClaudeProviderOption = {
-  id: string
-  label: string
-  authenticated: boolean
-}
-
-type ClaudeAvailableModelsResponse = {
-  provider: string
-  models: Array<{ id: string; description: string }>
-  providers: Array<ClaudeProviderOption>
-}
-
-async function fetchModels(): Promise<{
-  ok?: boolean
-  models?: Array<ModelCatalogEntry>
-  configuredProviders?: Array<string>
-  currentProvider?: string
-  providerLabels?: Record<string, string>
-  providers?: Array<ClaudeProviderOption>
-}> {
-  // Use the curated /api/models endpoint which returns only models
-  // actually configured and available (OCPlatform gateway + local providers).
-  // Previously this hit /api/claude-proxy/api/available-models which returned
-  // every upstream provider model — flooding the picker with unusable options.
-  const response = await fetch('/api/models')
-  if (!response.ok) {
-    throw new Error(`Models request failed (${response.status})`)
-  }
-
-  const payload = (await response.json()) as
-    | Array<unknown>
-    | {
-        data?: Array<Record<string, unknown>>
-        models?: Array<Record<string, unknown>>
-      }
-  const rawModels = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload.data)
-      ? payload.data
-      : Array.isArray(payload.models)
-        ? payload.models
-        : []
-
-  const models = rawModels
-    .map((entry) => {
-      if (typeof entry === 'string') return entry
-      if (!entry || typeof entry !== 'object') return null
-      const record = entry as Record<string, unknown>
-      const id =
-        readModelText(record.id) ||
-        readModelText(record.name) ||
-        readModelText(record.model)
-      if (!id) return null
-      const provider =
-        readModelText(record.provider) ||
-        readModelText(record.owned_by) ||
-        (id.includes('/') ? id.split('/')[0] : 'hermes-agent')
-
-      return {
-        ...record,
-        id,
-        provider,
-        name:
-          readModelText(record.name) ||
-          readModelText(record.display_name) ||
-          readModelText(record.label) ||
-          id,
-      }
-    })
-    .filter(isClaudeCatalogEntry)
-
-  const configuredProviders = Array.from(
-    new Set(
-      models.flatMap((entry) => {
-        if (typeof entry === 'string') return []
-        return typeof entry.provider === 'string' && entry.provider
-          ? [entry.provider]
-          : []
-      }),
-    ),
-  )
-
-  return {
-    ok: true,
-    models: models as Array<ModelCatalogEntry>,
-    configuredProviders,
-  }
-}
-
-async function fetchModelsForProvider(
-  provider: string,
-): Promise<Array<ModelCatalogEntry>> {
-  const normalizedProvider = provider.trim()
-  if (!normalizedProvider) return []
-
-  const response = await fetch(
-    `/api/claude-proxy/api/available-models?provider=${encodeURIComponent(normalizedProvider)}`,
-  )
-  if (!response.ok) {
-    throw new Error(`Hermes models request failed (${response.status})`)
-  }
-
-  const payload = (await response.json()) as ClaudeAvailableModelsResponse
-  return payload.models.map((model) => ({
-    id: model.id,
-    name: model.id,
-    provider: normalizedProvider,
-  }))
-}
-
-const LOCAL_PROVIDERS_SET = new Set(['ollama', 'atomic-chat'])
+const LOCAL_PROVIDERS_SET = new Set(
+  PROVIDER_CATALOG.filter((p) => p.authTypes.includes('local')).map((p) => p.id),
+)
 
 async function switchModel(
   model: string,
@@ -371,57 +254,6 @@ const IMAGE_QUALITY = 0.85
 /** Safe image attachment limit after processing (1MB). */
 const MAX_TRANSPORT_IMAGE_SIZE = 1 * 1024 * 1024
 
-const IMAGE_EXTENSION_TO_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  svg: 'image/svg+xml',
-  avif: 'image/avif',
-  heic: 'image/heic',
-  heif: 'image/heif',
-  tif: 'image/tiff',
-  tiff: 'image/tiff',
-}
-
-const TEXT_EXTENSION_TO_MIME: Record<string, string> = {
-  md: 'text/markdown',
-  txt: 'text/plain',
-  json: 'application/json',
-  csv: 'text/csv',
-  ts: 'text/plain',
-  tsx: 'text/plain',
-  js: 'text/plain',
-  py: 'text/plain',
-}
-
-function normalizeMimeType(value: string): string {
-  return value.trim().toLowerCase()
-}
-
-function isImageMimeType(value: string): boolean {
-  const normalized = normalizeMimeType(value)
-  return normalized.startsWith('image/')
-}
-
-function inferImageMimeTypeFromFileName(name: string): string {
-  const match = /\.([a-z0-9]+)$/i.exec(name.trim())
-  if (!match?.[1]) return ''
-  return IMAGE_EXTENSION_TO_MIME[match[1].toLowerCase()] || ''
-}
-
-function inferTextMimeTypeFromFileName(name: string): string {
-  const match = /\.([a-z0-9]+)$/i.exec(name.trim())
-  if (!match?.[1]) return ''
-  return TEXT_EXTENSION_TO_MIME[match[1].toLowerCase()] || ''
-}
-
-function isTextMimeType(value: string): boolean {
-  const normalized = normalizeMimeType(value)
-  return normalized.startsWith('text/') || normalized === 'application/json'
-}
 
 function isImageFile(file: File): boolean {
   if (isImageMimeType(file.type)) return true
@@ -884,49 +716,8 @@ function ChatComposerComponent({
   // Phase 4.2: Pinned models (kept for future use)
   const { pinned, isPinned, togglePin } = usePinnedModels()
 
-  const modelsQuery = useQuery({
-    queryKey: ['claude', 'models'],
-    queryFn: fetchModels,
-    refetchInterval: 60_000,
-    retry: false,
-  })
-  const currentProvider = modelsQuery.data?.currentProvider ?? ''
-  const otherProviders = useMemo(
-    () =>
-      (modelsQuery.data?.providers ?? []).filter(
-        (provider) => provider.id !== currentProvider,
-      ),
-    [currentProvider, modelsQuery.data?.providers],
-  )
-  const otherProviderModelsQuery = useQuery({
-    queryKey: [
-      'claude',
-      'models',
-      'other-providers',
-      otherProviders
-        .map((provider) => provider.id)
-        .sort()
-        .join('|'),
-    ],
-    enabled: isProviderSwitcherExpanded && otherProviders.length > 0,
-    retry: false,
-    queryFn: async () => {
-      const modelEntries = await Promise.all(
-        otherProviders.map(async (provider) => ({
-          providerId: provider.id,
-          models: await fetchModelsForProvider(provider.id),
-        })),
-      )
-
-      return modelEntries.reduce<Record<string, Array<ModelCatalogEntry>>>(
-        (acc, entry) => {
-          acc[entry.providerId] = entry.models
-          return acc
-        },
-        {},
-      )
-    },
-  })
+  const catalog = useModelCatalog()
+  const currentProvider = catalog.currentProvider
   const currentModelQuery = useQuery({
     queryKey: ['claude', 'session-status-model', sessionKey || 'main'],
     queryFn: () => fetchCurrentModelFromStatus(sessionKey),
@@ -1020,7 +811,6 @@ function ChatComposerComponent({
   })
 
   // Phase 4.2: (pinned model tracking kept for future use)
-  void modelsQuery.data
 
   // Per-session model override, persisted to localStorage keyed by sessionKey.
   // Drives both the composer label and the model passed to startStreaming.
@@ -1135,13 +925,8 @@ function ChatComposerComponent({
     [sessionKey],
   )
   // On new chat, currentModel is empty until a session is created.
-  // Read the runtime model from the models query (first item is from the current provider).
-  const configuredModel = useMemo(() => {
-    const models = modelsQuery.data?.models ?? []
-    if (!models.length) return ''
-    const first = models[0]
-    return typeof first === 'string' ? first : first.id || first.name || ''
-  }, [modelsQuery.data])
+  // Read the runtime model from the catalog (first section's first model).
+  const configuredModel = catalog.currentModel || (catalog.sections[0]?.models[0]?.id ?? '')
   // Derive the label directly from the store so navigation between sessions
   // updates without a render-window flash from a stale React-state mirror.
   const modelButtonLabel =
@@ -2426,177 +2211,76 @@ function ChatComposerComponent({
                         Model
                       </div>
                       <div className="pb-4 max-h-[60dvh] overflow-y-auto overflow-x-hidden">
-                        {(() => {
-                          const allModels = modelsQuery.data?.models ?? []
-                          const defaultProvider =
-                            modelsQuery.data?.currentProvider ?? ''
-                          if (allModels.length === 0) {
-                            return (
-                              <div className="p-4 text-center text-sm text-neutral-500">
-                                <p className="font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-                                  No models available
-                                </p>
-                                <p className="text-xs">
-                                  Check your Hermes provider configuration.
-                                </p>
-                              </div>
-                            )
-                          }
-                          // Parse models into typed entries
-                          const parsed = allModels.map((m) => {
-                            const mId = String(
-                              typeof m === 'string'
-                                ? m
-                                : m.id || m.model || m.name || 'unknown',
-                            )
-                            const mName = String(
-                              typeof m === 'string'
-                                ? m
-                                : m.name ||
-                                    m.displayName ||
-                                    m.label ||
-                                    m.id ||
-                                    m.model ||
-                                    m,
-                            )
-                            const mProvider =
-                              typeof m === 'string'
-                                ? defaultProvider
-                                : ((m as Record<string, unknown>)
-                                    .provider as string) || defaultProvider
-                            const LOCAL_PROVIDER_IDS = ['ollama', 'atomic-chat']
-                            const isLocal =
-                              (typeof m !== 'string' &&
-                                (m as Record<string, unknown>).description ===
-                                  'local') ||
-                              LOCAL_PROVIDER_IDS.includes(mProvider)
-                            return {
-                              id: mId,
-                              name: mName,
-                              provider: mProvider,
-                              isLocal,
-                            }
-                          })
-                          // Split pinned vs unpinned, group unpinned by provider
-                          const pinnedEntries = parsed.filter((e) =>
-                            isPinned(e.id),
-                          )
-                          const unpinnedGroups = new Map<
-                            string,
-                            typeof parsed
-                          >()
-                          for (const entry of parsed) {
-                            if (isPinned(entry.id)) continue
-                            const group =
-                              unpinnedGroups.get(entry.provider) ?? []
-                            group.push(entry)
-                            unpinnedGroups.set(entry.provider, group)
-                          }
-                          const renderEntry = (entry: (typeof parsed)[0]) => {
-                            const isActive =
-                              entry.id === currentModel ||
-                              `${defaultProvider}/${entry.id}` === currentModel
-                            return (
-                              <div
-                                key={entry.id}
-                                className="group relative flex items-center"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleModelSelect(
-                                      entry.id,
-                                      entry.provider || undefined,
-                                    )
-                                    setIsModelMenuOpen(false)
-                                  }}
-                                  className={`flex flex-1 items-center gap-3 px-4 py-3 text-left text-sm transition-colors ${
-                                    isActive
-                                      ? 'bg-accent-50 text-accent-700 font-medium dark:bg-accent-900/30 dark:text-accent-300 border-l-2 border-accent-500'
-                                      : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800'
-                                  }`}
-                                >
-                                  <span className="flex-1 truncate">
-                                    {entry.name}
-                                  </span>
-                                  {entry.isLocal && (
-                                    <span className="text-[10px] text-neutral-400 px-1.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800">
-                                      local
-                                    </span>
-                                  )}
-                                  {isActive && (
-                                    <span className="size-1.5 rounded-full bg-accent-500 shrink-0" />
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    togglePin(entry.id)
-                                  }}
-                                  className={`absolute right-3 rounded p-1 transition-opacity ${
-                                    isPinned(entry.id)
-                                      ? 'text-accent-500 opacity-80 hover:opacity-100'
-                                      : 'text-neutral-400 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-accent-500'
-                                  }`}
-                                  aria-label={
-                                    isPinned(entry.id)
-                                      ? `Unpin ${entry.name}`
-                                      : `Pin ${entry.name}`
-                                  }
-                                >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill={
-                                      isPinned(entry.id)
-                                        ? 'currentColor'
-                                        : 'none'
-                                    }
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                  >
-                                    <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
-                                  </svg>
-                                </button>
-                              </div>
-                            )
-                          }
-                          return (
-                            <>
-                              {pinnedEntries.length > 0 && (
-                                <div className="mb-2 border-b border-neutral-100 dark:border-neutral-800 pb-2">
-                                  <div className="flex items-center gap-1.5 px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-neutral-400">
-                                    <svg
-                                      width="13"
-                                      height="13"
-                                      viewBox="0 0 24 24"
-                                      fill="currentColor"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                      className="text-accent-500"
-                                    >
-                                      <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
-                                    </svg>
-                                    <span>Pinned</span>
-                                  </div>
-                                  {pinnedEntries.map(renderEntry)}
+                        {catalog.isLoading ? (
+                          <div className="p-4 text-center text-sm text-neutral-500">
+                            Loading models…
+                          </div>
+                        ) : catalog.sections.length === 0 ? (
+                          <div className="p-4 text-center text-sm text-neutral-500">
+                            <p className="font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                              No models available
+                            </p>
+                            <p className="text-xs">
+                              Check your Hermes provider configuration.
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            {catalog.sections.map((section) => (
+                              <div key={section.providerId}>
+                                <div className="px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-neutral-400">
+                                  {section.providerName}
                                 </div>
-                              )}
-                              {Array.from(unpinnedGroups.entries())
-                                .sort((a, b) => a[0].localeCompare(b[0]))
-                                .map(([provider, models]) => (
-                                  <div key={provider}>
-                                    <div className="px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-neutral-400">
-                                      {provider}
+                                {section.models.map((model) => {
+                                  const isActive =
+                                    model.id === currentModel ||
+                                    `${section.providerId}/${model.id}` === currentModel
+                                  return (
+                                    <div
+                                      key={model.id}
+                                      className="group relative flex items-center"
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleModelSelect(model.id, section.providerId)
+                                          setIsModelMenuOpen(false)
+                                        }}
+                                        className={`flex flex-1 items-center gap-3 px-4 py-3 text-left text-sm transition-colors ${
+                                          isActive
+                                            ? 'bg-accent-50 text-accent-700 font-medium dark:bg-accent-900/30 dark:text-accent-300 border-l-2 border-accent-500'
+                                            : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800'
+                                        }`}
+                                      >
+                                        <span className="flex-1 truncate">{model.name}</span>
+                                        {isActive && (
+                                          <span className="size-1.5 rounded-full bg-accent-500 shrink-0" />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          togglePin(model.id)
+                                        }}
+                                        className={`absolute right-3 rounded p-1 transition-opacity ${
+                                          isPinned(model.id)
+                                            ? 'text-accent-500 opacity-80 hover:opacity-100'
+                                            : 'text-neutral-400 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-accent-500'
+                                        }`}
+                                        aria-label={isPinned(model.id) ? `Unpin ${model.name}` : `Pin ${model.name}`}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill={isPinned(model.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                                          <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
+                                        </svg>
+                                      </button>
                                     </div>
-                                    {models.map(renderEntry)}
-                                  </div>
-                                ))}
-                            </>
-                          )
-                        })()}
+                                  )
+                                })}
+                              </div>
+                            ))}
+                          </>
+                        )}
                       </div>
                     </div>
                   </>,
@@ -2851,89 +2535,60 @@ function ChatComposerComponent({
                                 <div className="fixed inset-0 z-[199]" onClick={() => setIsModelMenuOpen(false)} />
                                 <div className="absolute bottom-full left-0 mb-2 z-[200] w-[min(28rem,calc(100vw-2rem))] min-w-[18rem] origin-bottom-left overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900 animate-in fade-in slide-in-from-bottom-2 duration-150">
                                   <div className="max-h-[20rem] overflow-y-auto overflow-x-hidden p-1">
-                                    {(() => {
-                                      const allModels = modelsQuery.data?.models ?? []
-                                      const defaultProvider = modelsQuery.data?.currentProvider ?? ''
-                                      if (allModels.length === 0) {
-                                        return <div className="p-4 text-center text-sm text-neutral-500">No models available</div>
-                                      }
-                                      const parsed = allModels.map((m) => {
-                                        const mId = String(typeof m === 'string' ? m : m.id || m.model || m.name || 'unknown')
-                                        const mName = String(typeof m === 'string' ? m : m.name || m.displayName || m.label || m.id || m.model || m)
-                                        const mProvider = typeof m === 'string' ? defaultProvider : ((m as Record<string, unknown>).provider as string) || defaultProvider
-                                        const isLocal = typeof m !== 'string' && (m as Record<string, unknown>).description === 'local'
-                                        return { id: mId, name: mName, provider: mProvider, isLocal }
-                                      })
-                                      const pinnedEntries = parsed.filter((e) => isPinned(e.id))
-                                      const unpinnedGroups = new Map<string, typeof parsed>()
-                                      for (const entry of parsed) {
-                                        if (isPinned(entry.id)) continue
-                                        const group = unpinnedGroups.get(entry.provider) ?? []
-                                        group.push(entry)
-                                        unpinnedGroups.set(entry.provider, group)
-                                      }
-                                      const renderEntry = (entry: (typeof parsed)[0]) => {
-                                        const isActive = entry.id === currentModel || `${defaultProvider}/${entry.id}` === currentModel
-                                        return (
-                                          <div key={entry.id} className="group relative flex items-center">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                handleModelSelect(entry.id, entry.provider || undefined)
-                                                setIsModelMenuOpen(false)
-                                              }}
-                                              className={`flex flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors ${
-                                                isActive
-                                                  ? 'border-l-2 border-accent-500 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
-                                                  : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800/50'
-                                              }`}
-                                            >
-                                              <span className="flex-1 truncate">{entry.name}</span>
-                                              {entry.isLocal ? <span className="text-[10px] text-neutral-400 px-1.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-700">local</span> : null}
-                                              {isActive ? <span className="h-1.5 w-1.5 rounded-full bg-accent-500" /> : null}
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={(e) => {
-                                                e.stopPropagation()
-                                                togglePin(entry.id)
-                                              }}
-                                              className={`absolute right-2 rounded p-1 transition-opacity ${
-                                                isPinned(entry.id)
-                                                  ? 'text-accent-500 opacity-80 hover:opacity-100'
-                                                  : 'text-neutral-400 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-accent-500'
-                                              }`}
-                                              aria-label={isPinned(entry.id) ? `Unpin ${entry.name}` : `Pin ${entry.name}`}
-                                            >
-                                              <svg width="12" height="12" viewBox="0 0 24 24" fill={isPinned(entry.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                                                <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
-                                              </svg>
-                                            </button>
+                                    {catalog.isLoading ? (
+                                      <div className="p-4 text-center text-sm text-neutral-500">Loading models…</div>
+                                    ) : catalog.sections.length === 0 ? (
+                                      <div className="p-4 text-center text-sm text-neutral-500">No models available</div>
+                                    ) : (
+                                      catalog.sections.map((section) => (
+                                        <div key={section.providerId}>
+                                          <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-neutral-400">
+                                            {section.providerName}
                                           </div>
-                                        )
-                                      }
-                                      return (
-                                        <>
-                                          {pinnedEntries.length > 0 ? (
-                                            <div className="mb-1 border-b border-neutral-200 pb-1 dark:border-neutral-700">
-                                              <div className="mb-1 flex items-center gap-1 px-3 text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" className="text-accent-500">
-                                                  <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
-                                                </svg>
-                                                <span>Pinned</span>
+                                          {section.models.map((model) => {
+                                            const isActive =
+                                              model.id === currentModel ||
+                                              `${section.providerId}/${model.id}` === currentModel
+                                            return (
+                                              <div key={model.id} className="group relative flex items-center">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    handleModelSelect(model.id, section.providerId)
+                                                    setIsModelMenuOpen(false)
+                                                  }}
+                                                  className={`flex flex-1 items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors ${
+                                                    isActive
+                                                      ? 'border-l-2 border-accent-500 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
+                                                      : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800/50'
+                                                  }`}
+                                                >
+                                                  <span className="flex-1 truncate">{model.name}</span>
+                                                  {isActive ? <span className="h-1.5 w-1.5 rounded-full bg-accent-500" /> : null}
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    togglePin(model.id)
+                                                  }}
+                                                  className={`absolute right-2 rounded p-1 transition-opacity ${
+                                                    isPinned(model.id)
+                                                      ? 'text-accent-500 opacity-80 hover:opacity-100'
+                                                      : 'text-neutral-400 opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-accent-500'
+                                                  }`}
+                                                  aria-label={isPinned(model.id) ? `Unpin ${model.name}` : `Pin ${model.name}`}
+                                                >
+                                                  <svg width="12" height="12" viewBox="0 0 24 24" fill={isPinned(model.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                                                    <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
+                                                  </svg>
+                                                </button>
                                               </div>
-                                              {pinnedEntries.map(renderEntry)}
-                                            </div>
-                                          ) : null}
-                                          {Array.from(unpinnedGroups.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([provider, models]) => (
-                                            <div key={provider}>
-                                              <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-neutral-400">{provider}</div>
-                                              {models.map(renderEntry)}
-                                            </div>
-                                          ))}
-                                        </>
-                                      )
-                                    })()}
+                                            )
+                                          })}
+                                        </div>
+                                      ))
+                                    )}
                                   </div>
                                 </div>
                               </>
@@ -3085,5 +2740,4 @@ export type {
   ChatComposerAttachment,
   ChatComposerHelpers,
   ChatComposerHandle,
-  ThinkingLevel,
 }

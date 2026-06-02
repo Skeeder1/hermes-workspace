@@ -10,6 +10,8 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { openHamburgerMenu } from '@/components/mobile-hamburger-menu'
+import { Spinner } from '@/components/ui/spinner'
+import type { ThinkingLevel } from './chat-composer'
 
 function toTitleCase(value: string): string {
   return value
@@ -63,8 +65,6 @@ function formatMobileSessionTitle(rawTitle: string): string {
 
   return title
 }
-
-type ThinkingLevel = 'off' | 'low' | 'adaptive'
 
 type ChatHeaderProps = {
   activeTitle: string
@@ -248,7 +248,7 @@ function ChatHeaderComponent({
         }
       >
         <div className="px-3 h-12 flex items-center gap-0">
-          {/* Hamburger lines — ChatGPT style, large tap target */}
+          {/* Hamburger lines — left side, large tap target */}
           <button
             type="button"
             onClick={openHamburgerMenu}
@@ -271,7 +271,7 @@ function ChatHeaderComponent({
             </svg>
           </button>
 
-          {/* Session name — centered pill, tappable */}
+          {/* Session name — left-aligned pill, tappable */}
           <button
             type="button"
             onClick={onOpenSessions}
@@ -486,10 +486,7 @@ function ChatHeaderComponent({
           )}
         </div>
         {renamingTitle ? (
-          <span
-            className="mr-1 inline-flex size-3 animate-spin rounded-full border border-primary-300 border-t-primary-700"
-            aria-label="Saving session name"
-          />
+          <Spinner size="xs" variant="none" className="mr-1 inline-flex border border-primary-300 border-t-primary-700" aria-label="Saving session name" />
         ) : null}
         {showThinkingIndicator ? (
           <TooltipProvider>

@@ -7,6 +7,24 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useHermesWorldSettings } from './hermesworld-settings'
 
+type SceneObject = {
+  type: string
+  pos?: [number, number, number]
+  color?: string
+  scale?: number
+  radius?: number
+  from?: [number, number]
+  to?: [number, number]
+  width?: number
+  roofColor?: string
+  sign?: string
+  awningColor?: string
+  rotation?: number
+  count?: number
+  palette?: string[]
+  glow?: string
+}
+
 // Deterministic pseudo-random based on seed so layout is stable per render
 function rng(seed: number) {
   return () => {
@@ -600,7 +618,7 @@ export function ScatteredScenery({
 }) {
   const items = useMemo(() => {
     const r = rng(seed * 100 + worldId.length)
-    const out: { type: string; pos: [number, number, number]; color?: string; scale?: number }[] = []
+    const out: SceneObject[] = []
 
     function maybeOnEdge(): [number, number, number] {
       // Place on ring 14-22 from center
@@ -625,7 +643,7 @@ export function ScatteredScenery({
 
     if (worldId === 'agora') {
       // Centerpiece fountain + paved plaza
-      out.push({ type: 'plaza', pos: [0, 0, 0], radius: 8, color: '#b89668' } as any)
+      out.push({ type: 'plaza', pos: [0, 0, 0], radius: 8, color: '#b89668' })
       out.push({ type: 'fountain', pos: [0, 0, 0], color: '#7dd3fc' })
 
       // Dirt paths radiating to NPC zones / portal / arch
@@ -633,16 +651,16 @@ export function ScatteredScenery({
         [12, -6], [-12, -6], [12, 6], [-12, 6], [0, 14], [0, -14],
       ]
       for (const t of pathTargets) {
-        out.push({ type: 'path', from: [0, 0], to: t, width: 1.6, color: '#9d7a4a' } as any)
+        out.push({ type: 'path', from: [0, 0], to: t, width: 1.6, color: '#9d7a4a' })
       }
 
       // Buildings around the plaza like a small town — signed roles create districts
-      out.push({ type: 'building', pos: [-13, 0, -15], color: '#e8d4a8', roofColor: '#b91c1c', sign: 'Smithy' } as any)
-      out.push({ type: 'building', pos: [13, 0, -15], color: '#f5deb3', roofColor: '#1d4ed8', sign: 'Apothecary' } as any)
-      out.push({ type: 'building', pos: [-17, 0, 9], color: '#deb887', roofColor: '#92400e', sign: 'Inn' } as any)
-      out.push({ type: 'building', pos: [17, 0, 9], color: '#e8d4a8', roofColor: '#b91c1c', sign: 'Bank' } as any)
-      out.push({ type: 'building', pos: [-2, 0, -19], color: '#f3e1bb', roofColor: '#1d4ed8', sign: 'Guild' } as any)
-      out.push({ type: 'building', pos: [2, 0, 18], color: '#f3e1bb', roofColor: '#b91c1c', sign: 'Tavern' } as any)
+      out.push({ type: 'building', pos: [-13, 0, -15], color: '#e8d4a8', roofColor: '#b91c1c', sign: 'Smithy' })
+      out.push({ type: 'building', pos: [13, 0, -15], color: '#f5deb3', roofColor: '#1d4ed8', sign: 'Apothecary' })
+      out.push({ type: 'building', pos: [-17, 0, 9], color: '#deb887', roofColor: '#92400e', sign: 'Inn' })
+      out.push({ type: 'building', pos: [17, 0, 9], color: '#e8d4a8', roofColor: '#b91c1c', sign: 'Bank' })
+      out.push({ type: 'building', pos: [-2, 0, -19], color: '#f3e1bb', roofColor: '#1d4ed8', sign: 'Guild' })
+      out.push({ type: 'building', pos: [2, 0, 18], color: '#f3e1bb', roofColor: '#b91c1c', sign: 'Tavern' })
 
       // Market street: stalls + merchants behind them
       const stallSetup: { stall: [number, number, number]; merchant: [number, number, number]; mColor: string; mRot: number; awning: string }[] = [
@@ -654,14 +672,14 @@ export function ScatteredScenery({
         { stall: [9, 0, -2], merchant: [9, 0, -1.3], mColor: '#9333ea', mRot: 0, awning: '#22d3ee' },
       ]
       for (const s of stallSetup) {
-        out.push({ type: 'stall', pos: s.stall, awningColor: s.awning } as any)
-        out.push({ type: 'townsfolk', pos: s.merchant, color: s.mColor, rotation: s.mRot } as any)
+        out.push({ type: 'stall', pos: s.stall, awningColor: s.awning })
+        out.push({ type: 'townsfolk', pos: s.merchant, color: s.mColor, rotation: s.mRot })
       }
 
       // A couple of strolling townsfolk near the fountain for life
-      out.push({ type: 'townsfolk', pos: [-4.5, 0, 4.5], color: '#0ea5e9', rotation: 1.2 } as any)
-      out.push({ type: 'townsfolk', pos: [4.5, 0, -4], color: '#facc15', rotation: -2.1 } as any)
-      out.push({ type: 'townsfolk', pos: [3, 0, 6], color: '#a21caf', rotation: -0.8 } as any)
+      out.push({ type: 'townsfolk', pos: [-4.5, 0, 4.5], color: '#0ea5e9', rotation: 1.2 })
+      out.push({ type: 'townsfolk', pos: [4.5, 0, -4], color: '#facc15', rotation: -2.1 })
+      out.push({ type: 'townsfolk', pos: [3, 0, 6], color: '#a21caf', rotation: -0.8 })
 
       // Lanterns ringing the fountain (ornamental)
       for (let i = 0; i < 8; i++) {
@@ -684,27 +702,27 @@ export function ScatteredScenery({
       for (let i = 0; i < 16; i++) {
         const ang = r() * Math.PI * 2
         const rad = 10 + r() * 7
-        out.push({ type: 'flowerpatch', pos: [Math.cos(ang) * rad, 0, Math.sin(ang) * rad], count: 6 + Math.floor(r() * 5) } as any)
+        out.push({ type: 'flowerpatch', pos: [Math.cos(ang) * rad, 0, Math.sin(ang) * rad], count: 6 + Math.floor(r() * 5) })
       }
 
       // A few rocks and a log pile for prop variety
-      out.push({ type: 'logs', pos: [-7, 0, -8], rotation: 0.3 } as any)
-      out.push({ type: 'logs', pos: [8, 0, 7], rotation: -0.5 } as any)
+      out.push({ type: 'logs', pos: [-7, 0, -8], rotation: 0.3 })
+      out.push({ type: 'logs', pos: [8, 0, 7], rotation: -0.5 })
       out.push({ type: 'rock', pos: [-9, 0, 9], scale: 0.9, color: '#6b7280' })
       out.push({ type: 'rock', pos: [10, 0, -9], scale: 1.1, color: '#5b6470' })
 
       // Landmark layer: wayfinding, social rest points, vertical centerpieces
-      out.push({ type: 'clocktower', pos: [-7, 0, -14], color: '#fbbf24' } as any)
-      out.push({ type: 'dais', pos: [8, 0, -13], color: '#a78bfa' } as any)
-      out.push({ type: 'training', pos: [-12, 0, 3], color: '#fb7185' } as any)
-      out.push({ type: 'signpost', pos: [-4, 0, -7], rotation: 0.8, color: '#fbbf24' } as any)
-      out.push({ type: 'signpost', pos: [5, 0, -7], rotation: -0.6, color: '#7dd3fc' } as any)
+      out.push({ type: 'clocktower', pos: [-7, 0, -14], color: '#fbbf24' })
+      out.push({ type: 'dais', pos: [8, 0, -13], color: '#a78bfa' })
+      out.push({ type: 'training', pos: [-12, 0, 3], color: '#fb7185' })
+      out.push({ type: 'signpost', pos: [-4, 0, -7], rotation: 0.8, color: '#fbbf24' })
+      out.push({ type: 'signpost', pos: [5, 0, -7], rotation: -0.6, color: '#7dd3fc' })
       for (const b of [
-        { pos: [-3.5, 0, 4.8], rotation: -0.55 },
-        { pos: [3.8, 0, 4.7], rotation: 0.55 },
-        { pos: [-4.8, 0, -4.2], rotation: 2.5 },
-        { pos: [4.8, 0, -4.2], rotation: -2.5 },
-      ]) out.push({ type: 'bench', ...b } as any)
+        { pos: [-3.5, 0, 4.8] as [number, number, number], rotation: -0.55 },
+        { pos: [3.8, 0, 4.7] as [number, number, number], rotation: 0.55 },
+        { pos: [-4.8, 0, -4.2] as [number, number, number], rotation: 2.5 },
+        { pos: [4.8, 0, -4.2] as [number, number, number], rotation: -2.5 },
+      ]) out.push({ type: 'bench', ...b })
 
       // Original arch + banners
       out.push({ type: 'arch', pos: [0, 0, 18], color: '#d7c7a4' })
@@ -714,12 +732,12 @@ export function ScatteredScenery({
 
     if (worldId === 'forge') {
       // Industrial tool district: energy core, workshops, cyan lamps
-      out.push({ type: 'energycore', pos: [0, 0, -2], color: '#22d3ee' } as any)
-      out.push({ type: 'building', pos: [-14, 0, -10], color: '#1f2937', roofColor: '#22d3ee', sign: 'Tools' } as any)
-      out.push({ type: 'building', pos: [14, 0, -10], color: '#1f2937', roofColor: '#22d3ee', sign: 'Skills' } as any)
-      out.push({ type: 'dais', pos: [0, 0, 10], color: '#22d3ee' } as any)
-      out.push({ type: 'signpost', pos: [-5, 0, 3], rotation: 0.4, color: '#22d3ee' } as any)
-      out.push({ type: 'signpost', pos: [5, 0, 3], rotation: -0.4, color: '#22d3ee' } as any)
+      out.push({ type: 'energycore', pos: [0, 0, -2], color: '#22d3ee' })
+      out.push({ type: 'building', pos: [-14, 0, -10], color: '#1f2937', roofColor: '#22d3ee', sign: 'Tools' })
+      out.push({ type: 'building', pos: [14, 0, -10], color: '#1f2937', roofColor: '#22d3ee', sign: 'Skills' })
+      out.push({ type: 'dais', pos: [0, 0, 10], color: '#22d3ee' })
+      out.push({ type: 'signpost', pos: [-5, 0, 3], rotation: 0.4, color: '#22d3ee' })
+      out.push({ type: 'signpost', pos: [5, 0, 3], rotation: -0.4, color: '#22d3ee' })
       for (let i = 0; i < 8; i++) {
         const ang = (i / 8) * Math.PI * 2
         out.push({ type: 'lantern', pos: [Math.cos(ang) * 6, 0, Math.sin(ang) * 6], color: '#22d3ee' })
@@ -732,13 +750,13 @@ export function ScatteredScenery({
       for (let i = 0; i < 18; i++) {
         const ang = r() * Math.PI * 2
         const rad = 8 + r() * 8
-        out.push({ type: 'flowerpatch', pos: [Math.cos(ang) * rad, 0, Math.sin(ang) * rad], count: 5 + Math.floor(r() * 4), palette: ['#86efac', '#fde68a', '#a7f3d0', '#fef3c7'] } as any)
+        out.push({ type: 'flowerpatch', pos: [Math.cos(ang) * rad, 0, Math.sin(ang) * rad], count: 5 + Math.floor(r() * 4), palette: ['#86efac', '#fde68a', '#a7f3d0', '#fef3c7'] })
       }
-      out.push({ type: 'logs', pos: [-5, 0, -3], rotation: 0.2 } as any)
-      out.push({ type: 'logs', pos: [4, 0, 5], rotation: -0.6 } as any)
-      out.push({ type: 'dais', pos: [0, 0, -8], color: '#86efac' } as any)
-      out.push({ type: 'crystals', pos: [7, 0, -6], color: '#86efac' } as any)
-      out.push({ type: 'crystals', pos: [-7, 0, 6], color: '#34d399' } as any)
+      out.push({ type: 'logs', pos: [-5, 0, -3], rotation: 0.2 })
+      out.push({ type: 'logs', pos: [4, 0, 5], rotation: -0.6 })
+      out.push({ type: 'dais', pos: [0, 0, -8], color: '#86efac' })
+      out.push({ type: 'crystals', pos: [7, 0, -6], color: '#86efac' })
+      out.push({ type: 'crystals', pos: [-7, 0, 6], color: '#34d399' })
       for (let i = 0; i < 8; i++) {
         const ang = (i / 8) * Math.PI * 2
         out.push({ type: 'lantern', pos: [Math.cos(ang) * 6, 0, Math.sin(ang) * 6], color: '#86efac' })
@@ -746,13 +764,13 @@ export function ScatteredScenery({
     }
 
     if (worldId === 'oracle') {
-      out.push({ type: 'dais', pos: [0, 0, 0], color: '#a78bfa' } as any)
-      out.push({ type: 'crystals', pos: [-4, 0, -5], color: '#a78bfa' } as any)
-      out.push({ type: 'crystals', pos: [4, 0, 5], color: '#c4b5fd' } as any)
+      out.push({ type: 'dais', pos: [0, 0, 0], color: '#a78bfa' })
+      out.push({ type: 'crystals', pos: [-4, 0, -5], color: '#a78bfa' })
+      out.push({ type: 'crystals', pos: [4, 0, 5], color: '#c4b5fd' })
       out.push({ type: 'arch', pos: [0, 0, -10], color: '#c4b5fd' })
       out.push({ type: 'arch', pos: [0, 0, 10], color: '#c4b5fd' })
-      out.push({ type: 'signpost', pos: [-6, 0, 0], rotation: 1.2, color: '#a78bfa' } as any)
-      out.push({ type: 'signpost', pos: [6, 0, 0], rotation: -1.2, color: '#c4b5fd' } as any)
+      out.push({ type: 'signpost', pos: [-6, 0, 0], rotation: 1.2, color: '#a78bfa' })
+      out.push({ type: 'signpost', pos: [6, 0, 0], rotation: -1.2, color: '#c4b5fd' })
       for (let i = 0; i < 8; i++) {
         const ang = (i / 8) * Math.PI * 2
         out.push({ type: 'lantern', pos: [Math.cos(ang) * 9, 0, Math.sin(ang) * 9], color: '#a78bfa' })
@@ -762,10 +780,10 @@ export function ScatteredScenery({
 
     if (worldId === 'arena') {
       // Banners + duel ring + champion platform
-      out.push({ type: 'training', pos: [0, 0, 0], color: '#fb7185' } as any)
-      out.push({ type: 'dais', pos: [0, 0, -10], color: '#fb7185' } as any)
-      out.push({ type: 'signpost', pos: [-7, 0, 5], rotation: 0.6, color: '#fb7185' } as any)
-      out.push({ type: 'signpost', pos: [7, 0, 5], rotation: -0.6, color: '#fb7185' } as any)
+      out.push({ type: 'training', pos: [0, 0, 0], color: '#fb7185' })
+      out.push({ type: 'dais', pos: [0, 0, -10], color: '#fb7185' })
+      out.push({ type: 'signpost', pos: [-7, 0, 5], rotation: 0.6, color: '#fb7185' })
+      out.push({ type: 'signpost', pos: [7, 0, 5], rotation: -0.6, color: '#fb7185' })
       for (let i = 0; i < 10; i++) {
         const ang = (i / 10) * Math.PI * 2
         out.push({ type: 'banner', pos: [Math.cos(ang) * 11, 0, Math.sin(ang) * 11], color: '#fb7185' })
@@ -779,57 +797,57 @@ export function ScatteredScenery({
     return out
   }, [worldId, seed])
 
-  const rockItems = useMemo(() => items.filter((it) => it.type === 'rock'), [items])
-  const grassItems = useMemo(() => items.filter((it) => it.type === 'grass'), [items])
+  const rockItems = useMemo(() => items.filter((it) => it.type === 'rock') as SceneryInstance[], [items])
+  const grassItems = useMemo(() => items.filter((it) => it.type === 'grass') as SceneryInstance[], [items])
   return (
     <>
       {rockItems.length ? <InstancedRocks items={rockItems} /> : null}
       {grassItems.length ? <InstancedGrassTufts items={grassItems} /> : null}
-      {items.map((it: any, i) => {
+      {items.map((it, i) => {
         switch (it.type) {
           case 'pine':
-            return <PineTree key={i} position={it.pos} scale={it.scale} color={it.color} />
+            return <PineTree key={i} position={it.pos!} scale={it.scale} color={it.color} />
           case 'broadleaf':
-            return <BroadleafTree key={i} position={it.pos} scale={it.scale} color={it.color} />
+            return <BroadleafTree key={i} position={it.pos!} scale={it.scale} color={it.color} />
           case 'rock':
           case 'grass':
             return null
           case 'stall':
-            return <MarketStall key={i} position={it.pos} awningColor={it.awningColor} />
+            return <MarketStall key={i} position={it.pos!} awningColor={it.awningColor} />
           case 'townsfolk':
-            return <Townsfolk key={i} position={it.pos} color={it.color} rotation={it.rotation || 0} />
+            return <Townsfolk key={i} position={it.pos!} color={it.color} rotation={it.rotation || 0} />
           case 'building':
-            return <Building key={i} position={it.pos} color={it.color} roofColor={it.roofColor} sign={it.sign} />
+            return <Building key={i} position={it.pos!} color={it.color} roofColor={it.roofColor} sign={it.sign} />
           case 'lantern':
-            return <Lantern key={i} position={it.pos} color={it.color} />
+            return <Lantern key={i} position={it.pos!} color={it.color} />
           case 'arch':
-            return <StoneArch key={i} position={it.pos} color={it.color} />
+            return <StoneArch key={i} position={it.pos!} color={it.color} />
           case 'banner':
-            return <Banner key={i} position={it.pos} color={it.color} />
+            return <Banner key={i} position={it.pos!} color={it.color} />
           case 'fountain':
-            return <Fountain key={i} position={it.pos} accent={it.color} />
+            return <Fountain key={i} position={it.pos!} accent={it.color} />
           case 'flowerpatch':
-            return <FlowerPatch key={i} position={it.pos} count={it.count} palette={it.palette} seed={i} />
+            return <FlowerPatch key={i} position={it.pos!} count={it.count} palette={it.palette} seed={i} />
           case 'logs':
-            return <LogPile key={i} position={it.pos} rotation={it.rotation || 0} />
+            return <LogPile key={i} position={it.pos!} rotation={it.rotation || 0} />
           case 'plaza':
-            return <PlazaDisc key={i} position={it.pos} radius={it.radius} color={it.color} />
+            return <PlazaDisc key={i} position={it.pos!} radius={it.radius} color={it.color} />
           case 'path':
-            return <PathStrip key={i} from={it.from} to={it.to} width={it.width} color={it.color} />
+            return <PathStrip key={i} from={it.from!} to={it.to!} width={it.width} color={it.color} />
           case 'clocktower':
-            return <ClockTower key={i} position={it.pos} accent={it.color} />
+            return <ClockTower key={i} position={it.pos!} accent={it.color} />
           case 'signpost':
-            return <Signpost key={i} position={it.pos} rotation={it.rotation || 0} color={it.color} />
+            return <Signpost key={i} position={it.pos!} rotation={it.rotation || 0} color={it.color} />
           case 'bench':
-            return <Bench key={i} position={it.pos} rotation={it.rotation || 0} />
+            return <Bench key={i} position={it.pos!} rotation={it.rotation || 0} />
           case 'training':
-            return <TrainingRing key={i} position={it.pos} accent={it.color} />
+            return <TrainingRing key={i} position={it.pos!} accent={it.color} />
           case 'dais':
-            return <RaisedDais key={i} position={it.pos} accent={it.color} />
+            return <RaisedDais key={i} position={it.pos!} accent={it.color} />
           case 'crystals':
-            return <CrystalCluster key={i} position={it.pos} color={it.color} />
+            return <CrystalCluster key={i} position={it.pos!} color={it.color} />
           case 'energycore':
-            return <EnergyCore key={i} position={it.pos} color={it.color} />
+            return <EnergyCore key={i} position={it.pos!} color={it.color} />
           default:
             return null
         }

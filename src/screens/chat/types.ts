@@ -51,7 +51,7 @@ export type ChatAttachment = {
   height?: number
 }
 
-export type StreamingStatus = 'idle' | 'streaming' | 'complete' | 'error'
+export type StreamingStatus = 'idle' | 'streaming' | 'complete' | 'error' | 'interrupted'
 
 export type ChatMessage = {
   role?: string

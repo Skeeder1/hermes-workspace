@@ -756,8 +756,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   return false
                 }
                 return (
-                  normalizeString((existing as any).status) === 'sending' ||
-                  Boolean((existing as any).__optimisticId)
+                  normalizeString(existing.status) === 'sending' ||
+                  Boolean(existing.__optimisticId)
                 )
               })
             : -1
@@ -795,7 +795,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const newPlainText = extractMessageText(normalizedMessage)
         const isExternalInboundUser =
           normalizedMessage.role === 'user' &&
-          isExternalInboundUserSource((event as any).source)
+          isExternalInboundUserSource(event.type === 'user_message' ? event.source : undefined)
         const incomingEventTime =
           getMessageEventTime(normalizedMessage) ?? incomingReceiveTime
 
@@ -838,7 +838,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const incomingMessage: ChatMessage = {
           ...normalizedMessage,
           __realtimeSource:
-            event.type === 'user_message' ? (event as any).source : undefined,
+            event.type === 'user_message' ? event.source : undefined,
           __receiveTime: incomingReceiveTime,
           __realtimeSequence: realtimeMessageSequence++,
           status: undefined,
@@ -849,11 +849,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const incomingText = extractMessageText(incomingMessage)
           const optimisticText = extractMessageText(optimisticMessage)
           const incomingHasAttachments =
-            Array.isArray((incomingMessage as any).attachments) &&
-            (incomingMessage as any).attachments.length > 0
+            Array.isArray(incomingMessage.attachments) &&
+            incomingMessage.attachments.length > 0
           const optimisticHasAttachments =
-            Array.isArray((optimisticMessage as any).attachments) &&
-            (optimisticMessage as any).attachments.length > 0
+            Array.isArray(optimisticMessage.attachments) &&
+            optimisticMessage.attachments.length > 0
 
           sessionMessages[optimisticIndex] = {
             ...optimisticMessage,
@@ -971,11 +971,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...nextToolCalls[existingToolIndex],
             phase: event.phase,
             args: event.args ?? nextToolCalls[existingToolIndex].args,
-            preview:
-              (event as any).preview ??
-              nextToolCalls[existingToolIndex].preview,
-            result:
-              (event as any).result ?? nextToolCalls[existingToolIndex].result,
+            preview: event.preview ?? nextToolCalls[existingToolIndex].preview,
+            result: event.result ?? nextToolCalls[existingToolIndex].result,
           }
         } else {
           // Create entry for ANY phase (complete, error, skill.loaded, artifact.created, etc.)
@@ -985,8 +982,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             name: event.name,
             phase: event.phase,
             args: event.args,
-            preview: (event as any).preview,
-            result: (event as any).result,
+            preview: event.preview,
+            result: event.result,
           })
         }
 
@@ -1028,9 +1025,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             timestamp: getMessageEventTime(cleanedMessage) ?? now,
             __receiveTime: now,
             __realtimeSequence: realtimeMessageSequence++,
-            __streamingStatus: (event.state === 'interrupted'
-              ? 'interrupted'
-              : 'complete') as any,
+            __streamingStatus: event.state === 'interrupted' ? 'interrupted' : 'complete',
             ...(streamToolCallsToEmbed
               ? { __streamToolCalls: streamToolCallsToEmbed }
               : {}),
@@ -1220,12 +1215,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (histText === rtText) return true
           if (histText && rtText.startsWith(histText)) return true
         }
-        const rtAttachments = Array.isArray((rtMsg as any).attachments)
-          ? ((rtMsg as any).attachments as Array<Record<string, unknown>>)
-          : []
-        const histAttachments = Array.isArray((histMsg as any).attachments)
-          ? ((histMsg as any).attachments as Array<Record<string, unknown>>)
-          : []
+        const rtAttachments = Array.isArray(rtMsg.attachments) ? rtMsg.attachments : []
+        const histAttachments = Array.isArray(histMsg.attachments) ? histMsg.attachments : []
         if (
           rtAttachments.length > 0 &&
           rtAttachments.length == histAttachments.length
@@ -1255,8 +1246,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!matchingRealtime) return histMsg
       // Preserve attachments from the optimistic/realtime message when history doesn't have them
       const merged = mergeRealtimeAssistantMetadata(histMsg, matchingRealtime)
-      const rtAttachments = (matchingRealtime as any).attachments
-      const histAttachments = (merged as any).attachments
+      const rtAttachments = matchingRealtime.attachments
+      const histAttachments = merged.attachments
       if (
         Array.isArray(rtAttachments) &&
         rtAttachments.length > 0 &&
@@ -1293,7 +1284,7 @@ function extractTextFromContent(
     content
       .filter(
         (c): c is TextContent =>
-          c.type === 'text' && typeof (c as any).text === 'string',
+          c.type === 'text' && typeof c.text === 'string',
       )
       .map((c) => c.text)
       .join('\n')
@@ -1348,20 +1339,14 @@ function mergeRealtimeAssistantMetadata(
     return historyMessage
   }
 
-  const realtimeToolCalls = Array.isArray(
-    (realtimeMessage as any).__streamToolCalls,
-  )
-    ? (realtimeMessage as any).__streamToolCalls
+  const realtimeToolCalls = Array.isArray(realtimeMessage.__streamToolCalls)
+    ? (realtimeMessage.__streamToolCalls as unknown[])
     : []
-  const historyToolCalls = Array.isArray(
-    (historyMessage as any).__streamToolCalls,
-  )
-    ? (historyMessage as any).__streamToolCalls
+  const historyToolCalls = Array.isArray(historyMessage.__streamToolCalls)
+    ? (historyMessage.__streamToolCalls as unknown[])
     : []
-  const historyStreamToolCalls = Array.isArray(
-    (historyMessage as any).streamToolCalls,
-  )
-    ? (historyMessage as any).streamToolCalls
+  const historyStreamToolCalls = Array.isArray(historyMessage.streamToolCalls)
+    ? (historyMessage.streamToolCalls as unknown[])
     : []
 
   if (
