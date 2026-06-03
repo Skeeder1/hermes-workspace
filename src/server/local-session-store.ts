@@ -79,6 +79,9 @@ export function ensureLocalSession(
     }
     store.messages[sessionId] = []
     saveToDisk()
+  } else if (model && !store.sessions[sessionId].model) {
+    store.sessions[sessionId].model = model
+    saveToDisk()
   }
   return store.sessions[sessionId]
 }

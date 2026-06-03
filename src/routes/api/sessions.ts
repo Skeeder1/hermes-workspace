@@ -17,6 +17,7 @@ import { createCapabilityUnavailablePayload } from '@/lib/feature-gates'
 import { toErrorMessage } from '@/lib/error-utils'
 import {
   deleteLocalSession,
+  ensureLocalSession,
   getLocalSession,
   listLocalSessions,
   updateLocalSessionTitle,
@@ -61,9 +62,9 @@ export const Route = createFileRoute('/api/sessions')({
                 key: ls.id,
                 id: ls.id,
                 friendlyId: ls.id,
-                title: ls.title || 'Local Chat',
-                label: ls.title || 'Local Chat',
-                derivedTitle: ls.title || 'Local Chat',
+                title: ls.title || null,
+                label: ls.title || null,
+                derivedTitle: ls.title || null,
                 startedAt: ls.createdAt,
                 updatedAt: ls.updatedAt,
                 message_count: ls.messageCount,
@@ -73,6 +74,7 @@ export const Route = createFileRoute('/api/sessions')({
             }
           }
 
+          gatewaySessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
           return json({ sessions: gatewaySessions }, NO_STORE)
         } catch (err) {
           return json(
@@ -119,6 +121,7 @@ export const Route = createFileRoute('/api/sessions')({
           const model = requestedModel || undefined
 
           if (capabilities.dashboard.available && !capabilities.enhancedChat) {
+            ensureLocalSession(friendlyId, model)
             return json({
               ok: true,
               sessionKey: friendlyId,
@@ -126,17 +129,17 @@ export const Route = createFileRoute('/api/sessions')({
               entry: {
                 key: friendlyId,
                 id: friendlyId,
-                title: label || friendlyId,
-                label: label || friendlyId,
-                derivedTitle: label || friendlyId,
+                title: label || null,
+                label: label || null,
+                derivedTitle: label || null,
                 model: model || '',
                 startedAt: Date.now(),
                 updatedAt: Date.now(),
                 message_count: 0,
-                source: 'dashboard',
+                source: 'local',
               },
               modelApplied: Boolean(model),
-              persisted: false,
+              persisted: true,
             })
           }
 
