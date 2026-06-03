@@ -3,6 +3,19 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+function buildEnvWithUserPath(): NodeJS.ProcessEnv {
+  const home = homedir()
+  const extraDirs = [
+    join(home, '.local', 'bin'),
+    join(home, 'bin'),
+    join(home, '.cargo', 'bin'),
+    join(home, '.npm-global', 'bin'),
+  ]
+  const existing = (process.env.PATH ?? '').split(':').filter(Boolean)
+  const merged = [...extraDirs, ...existing.filter((d) => !extraDirs.includes(d))]
+  return { ...process.env, PATH: merged.join(':') }
+}
+
 export interface CliTestResult {
   ok: boolean
   status: 'connected' | 'failed' | 'unknown'
@@ -47,7 +60,7 @@ function execHermes(
     // can outlive the killed CLI as an orphan. Codex review feedback.
     const child = spawn(resolveHermesBin(), args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
+      env: buildEnvWithUserPath(),
       detached: true,
     })
     let stdout = ''

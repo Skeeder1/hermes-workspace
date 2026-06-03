@@ -53,7 +53,7 @@ export function McpServerCard({ server, onEdit }: Props) {
   // (workspace shells out to `hermes mcp test <name>`). Logs and Reauth
   // still require the live runtime /api/mcp endpoints.
   const liveOnlyTitle = fallbackMode
-    ? 'Requires hermes-agent /api/mcp runtime endpoint (not available in local fallback mode).'
+    ? 'Requires hermes-agent /api/mcp runtime endpoint (unavailable in local fallback mode).'
     : ''
   const qc = useQueryClient()
   const [confirmDelete, setConfirmDelete] = useState(false)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'motion/react'
 import { McpServerCard } from './components/mcp-server-card'
@@ -39,6 +39,27 @@ export function McpScreen() {
   const categories = query.data?.categories ?? ['All']
 
   const hubQuery = useMcpHub(tab === 'marketplace' ? search : '')
+
+  // In fallback mode, auto-probe servers with unknown status on first load
+  // so tool counts and status are populated without requiring manual "Test" clicks.
+  const autoProbed = useRef(false)
+  useEffect(() => {
+    if (capabilityMode !== 'fallback') return
+    if (autoProbed.current) return
+    const unknownServers = servers.filter((s) => s.status === 'unknown')
+    if (unknownServers.length === 0) return
+    autoProbed.current = true
+    void (async () => {
+      for (const server of unknownServers) {
+        await fetch('/api/mcp/test', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: server.name }),
+        }).catch(() => {})
+      }
+      void queryClient.invalidateQueries({ queryKey: ['mcp', 'servers'] })
+    })()
+  }, [capabilityMode, servers, queryClient])
 
   function handleTabChange(next: string | number | null) {
     if (next === 'installed' || next === 'marketplace') {
@@ -85,8 +106,9 @@ export function McpScreen() {
               role="status"
               className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
             >
-              ⚠ Local fallback mode — using config.yaml. Test, Discover, and
-              Logs require the new hermes-agent /api/mcp endpoints.
+              ⚠ Local fallback mode — using config.yaml. Test works via CLI
+              bridge. Discover, Logs and Reauth require the hermes-agent
+              /api/mcp runtime endpoints.
             </div>
           ) : null}
         </header>
